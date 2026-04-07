@@ -78,6 +78,8 @@ function computeGlobalStats(allRecords) {
   const bySpecialty = {};
   const bySource   = {};
   const byEmployeeBucket = { '1-25': 0, '26-100': 0, '101-500': 0, '500+': 0, 'Unknown': 0 };
+  const byRevenueBucket  = { '<$1M': 0, '$1M-$5M': 0, '$5M-$10M': 0, '$10M-$25M': 0, '$25M+': 0, 'Unknown': 0 };
+  const byProviderBucket = { '1-5': 0, '6-15': 0, '16-30': 0, '31-50': 0, '50+': 0, 'Unknown': 0 };
   let notRcmCount = 0, roeCount = 0, confirmedIcpCount = 0;
 
   for (const { fields } of allRecords) {
@@ -105,13 +107,29 @@ function computeGlobalStats(allRecords) {
     else if (emp <= 500) byEmployeeBucket['101-500']++;
     else byEmployeeBucket['500+']++;
 
+    // Revenue bucket
+    const rev = fields['Annual Revenue ($)'];
+    if (!rev || rev === 0) byRevenueBucket['Unknown']++;
+    else if (rev < 1_000_000) byRevenueBucket['<$1M']++;
+    else if (rev < 5_000_000) byRevenueBucket['$1M-$5M']++;
+    else if (rev < 10_000_000) byRevenueBucket['$5M-$10M']++;
+    else if (rev < 25_000_000) byRevenueBucket['$10M-$25M']++;
+    else byRevenueBucket['$25M+']++;
+
+    // Provider bucket
+    const providers = fields['Providers #'];
+    if (!providers || providers === 0) byProviderBucket['Unknown']++;
+    else if (providers <= 5) byProviderBucket['1-5']++;
+    else if (providers <= 15) byProviderBucket['6-15']++;
+    else if (providers <= 30) byProviderBucket['16-30']++;
+    else if (providers <= 50) byProviderBucket['31-50']++;
+    else byProviderBucket['50+']++;
+
     if (fields['Not in RCM ICP']) notRcmCount++;
 
     const roe = fields['Potential ROE Issue'];
     if (roe === true || (typeof roe === 'string' && roe.trim() && roe.toLowerCase() !== 'none')) roeCount++;
 
-    const rev = fields['Annual Revenue ($)'];
-    const providers = fields['Providers #'];
     const employees = fields['Employees #'];
     const locations = fields['# of locations'];
     if (
@@ -129,6 +147,8 @@ function computeGlobalStats(allRecords) {
     bySpecialty,
     bySource,
     byEmployeeBucket,
+    byRevenueBucket,
+    byProviderBucket,
     notRcmCount,
     roeCount,
     confirmedIcpCount,
@@ -208,7 +228,7 @@ export default async function handler(req, res) {
 
   // ─── Filtering ─────────────────────────────────────────────────────────────
   let records = allRecords;
-  const { ehr, stage, specialty, source, nonRcm, roe, search } = req.query;
+  const { ehr, stage, specialty, source, nonRcm, roe, search, revenueBucket, providerBucket, employeeBucket } = req.query;
 
   if (ehr) {
     const vals = ehr.split(',');
@@ -239,6 +259,50 @@ export default async function handler(req, res) {
   if (search) {
     const q = search.toLowerCase();
     records = records.filter((r) => (r.fields['Account Name'] || '').toLowerCase().includes(q));
+  }
+  if (revenueBucket) {
+    const buckets = revenueBucket.split(',');
+    records = records.filter((r) => {
+      const rev = r.fields['Annual Revenue ($)'];
+      return buckets.some((b) => {
+        if (b === 'Unknown') return !rev || rev === 0;
+        if (b === '<$1M') return rev > 0 && rev < 1_000_000;
+        if (b === '$1M-$5M') return rev >= 1_000_000 && rev < 5_000_000;
+        if (b === '$5M-$10M') return rev >= 5_000_000 && rev < 10_000_000;
+        if (b === '$10M-$25M') return rev >= 10_000_000 && rev < 25_000_000;
+        if (b === '$25M+') return rev >= 25_000_000;
+        return false;
+      });
+    });
+  }
+  if (providerBucket) {
+    const buckets = providerBucket.split(',');
+    records = records.filter((r) => {
+      const providers = r.fields['Providers #'];
+      return buckets.some((b) => {
+        if (b === 'Unknown') return !providers || providers === 0;
+        if (b === '1-5') return providers >= 1 && providers <= 5;
+        if (b === '6-15') return providers >= 6 && providers <= 15;
+        if (b === '16-30') return providers >= 16 && providers <= 30;
+        if (b === '31-50') return providers >= 31 && providers <= 50;
+        if (b === '50+') return providers > 50;
+        return false;
+      });
+    });
+  }
+  if (employeeBucket) {
+    const buckets = employeeBucket.split(',');
+    records = records.filter((r) => {
+      const emp = r.fields['Employees #'];
+      return buckets.some((b) => {
+        if (b === 'Unknown') return !emp || emp === 0;
+        if (b === '1-25') return emp >= 1 && emp <= 25;
+        if (b === '26-100') return emp >= 26 && emp <= 100;
+        if (b === '101-500') return emp >= 101 && emp <= 500;
+        if (b === '500+') return emp > 500;
+        return false;
+      });
+    });
   }
 
   // ─── Filtered aggregations ─────────────────────────────────────────────────

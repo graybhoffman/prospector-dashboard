@@ -128,6 +128,78 @@ function formatDate(dateStr) {
   } catch { return dateStr; }
 }
 
+// ─── Week / Month helpers ─────────────────────────────────────────────────────
+function getMondayOfWeek(date, weekOffset = 0) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // shift to Monday (ISO week start)
+  d.setDate(d.getDate() + diff + weekOffset * 7);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getSundayOfWeek(mondayDate) {
+  const d = new Date(mondayDate);
+  d.setDate(d.getDate() + 6);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function getMonthStart(date, monthOffset = 0) {
+  const d = new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getMonthEnd(monthStart) {
+  const d = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function fmtWeekLabel(mondayDate, offset) {
+  if (offset === 0) return 'This Week';
+  if (offset === 1) return 'Last Week';
+  return mondayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function fmtMonthLabel(monthStart, offset) {
+  if (offset === 0) return 'This Month';
+  if (offset === 1) return 'Last Month';
+  return monthStart.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+}
+
+function getTrailingWeeks(n = 4) {
+  const now = new Date();
+  return Array.from({ length: n }, (_, i) => {
+    const offset = n - 1 - i;
+    const start = getMondayOfWeek(now, -offset);
+    const end   = getSundayOfWeek(start);
+    return { label: fmtWeekLabel(start, offset), start, end, offset };
+  });
+}
+
+function getTrailingMonths(n = 4) {
+  const now = new Date();
+  return Array.from({ length: n }, (_, i) => {
+    const offset = n - 1 - i;
+    const start = getMonthStart(now, -offset);
+    const end   = getMonthEnd(start);
+    return { label: fmtMonthLabel(start, offset), start, end, offset };
+  });
+}
+
+function countInPeriod(activityItems, stages, start, end) {
+  const stageSet = new Set(stages);
+  const seen = new Set();
+  for (const item of activityItems) {
+    if (!stageSet.has(item.to_stage)) continue;
+    const d = new Date(item.transition_date);
+    if (d >= start && d <= end) seen.add(item.account_name + '|' + item.to_stage);
+  }
+  return seen.size;
+}
+
 // ─── Primitive components ─────────────────────────────────────────────────────
 function Muted({ children = '—' }) {
   return <span style={{ color: C.textMuted }}>{children}</span>;
@@ -412,16 +484,17 @@ function MarketSummarySection({ globals, statsLoading }) {
 }
 
 // ─── Stage Funnel ─────────────────────────────────────────────────────────────
-function StageFunnel({ byStage }) {
+function StageFunnel({ byStage, onStageClick, selectedStage }) {
   if (!byStage) return null;
 
   const stages = PIPELINE_STAGES;
   const counts  = stages.map((s) => byStage[s] || 0);
   const maxCount = Math.max(...counts, 1);
+  const isClickable = !!onStageClick;
 
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Stage Funnel</div>
+      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Stage Funnel{isClickable && <span style={{ marginLeft: 6, fontWeight: 400 }}>· click to filter</span>}</div>
       <div style={{ overflowX: 'auto' }}>
         <div style={{ display: 'flex', gap: 4, minWidth: 600, alignItems: 'flex-end' }}>
           {stages.map((stage, i) => {
@@ -430,8 +503,21 @@ function StageFunnel({ byStage }) {
             const convRate = prev != null && prev > 0 ? Math.round((count / prev) * 100) : null;
             const height = maxCount > 0 ? Math.max(32, Math.round((count / maxCount) * 120)) : 32;
             const isActive = ACTIVE_STAGES.has(stage);
+            const isSelected = selectedStage === stage;
             return (
-              <div key={stage} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div
+                key={stage}
+                onClick={() => isClickable && onStageClick(stage)}
+                style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  cursor: isClickable ? 'pointer' : 'default',
+                  borderRadius: 6,
+                  outline: isSelected ? `2px solid ${isActive ? C.amber : C.blue}` : 'none',
+                  padding: '4px 2px',
+                  background: isSelected ? (isActive ? C.amber : C.blue) + '11' : 'transparent',
+                  transition: 'background 0.15s',
+                }}
+              >
                 <div style={{ color: isActive ? C.amber : C.textSec, fontWeight: 700, fontSize: 14 }}>{fmt(count)}</div>
                 <div style={{
                   width: '100%',
@@ -889,10 +975,163 @@ function PaginationBtn({ disabled, onClick, children }) {
 }
 
 // ─── Section 3: Pipeline ──────────────────────────────────────────────────────
+
+// --- WoW/MoM Pipeline Stage Table (Change 9) ---
+const WOW_MOM_STAGES = ['Outreach', 'Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Pilot Deployment', 'Full Deployment'];
+
+function PipelineWowMom({ activityData }) {
+  if (!activityData) {
+    return <div style={{ color: C.textMuted, fontSize: 12, padding: '12px 0', textAlign: 'center' }}>⟳ Loading trend data…</div>;
+  }
+
+  const items = activityData.activity || [];
+  const weeks  = getTrailingWeeks(4);
+  const months = getTrailingMonths(4);
+
+  const stageCountInPeriod = (stage, start, end) =>
+    countInPeriod(items, [stage], start, end);
+
+  const wowRows = WOW_MOM_STAGES.map((stage) => {
+    const counts = weeks.map(({ start, end }) => stageCountInPeriod(stage, start, end));
+    return { stage, counts, delta: counts[3] - counts[2] };
+  });
+  const wowTotals = weeks.map((_, wi) => wowRows.reduce((s, r) => s + r.counts[wi], 0));
+
+  const momRows = WOW_MOM_STAGES.map((stage) => {
+    const counts = months.map(({ start, end }) => stageCountInPeriod(stage, start, end));
+    return { stage, counts, delta: counts[3] - counts[2] };
+  });
+  const momTotals = months.map((_, mi) => momRows.reduce((s, r) => s + r.counts[mi], 0));
+
+  const thS = { padding: '5px 10px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.3px', whiteSpace: 'nowrap', background: C.surface };
+  const tdS = { padding: '5px 10px', textAlign: 'center', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}1a` };
+
+  const DeltaCell = ({ delta }) => (
+    <td style={{ ...tdS }}>
+      {delta === 0
+        ? <span style={{ color: C.textMuted }}>—</span>
+        : <span style={{ color: delta > 0 ? C.green : C.red, fontWeight: 600 }}>{delta > 0 ? '▲' : '▼'}{Math.abs(delta)}</span>
+      }
+    </td>
+  );
+
+  const TrendTable = ({ title, headers, rows, totals }) => (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', flex: '1 1 300px', minWidth: 300 }}>
+      <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, color: C.textSec, fontSize: 12, fontWeight: 600 }}>{title}</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thS, textAlign: 'left', width: 120 }}>Stage</th>
+              {headers.map((h) => <th key={h.label} style={thS}>{h.label}</th>)}
+              <th style={thS}>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.stage}>
+                <td style={{ ...tdS, textAlign: 'left' }}>
+                  <SelectBadge value={row.stage} color={C.blue} small />
+                </td>
+                {row.counts.map((c, i) => (
+                  <td key={i} style={{ ...tdS, color: i === row.counts.length - 1 ? C.textPri : C.textSec, fontWeight: i === row.counts.length - 1 ? 600 : 400 }}>
+                    {c > 0 ? c : <span style={{ color: C.textMuted }}>—</span>}
+                  </td>
+                ))}
+                <DeltaCell delta={row.delta} />
+              </tr>
+            ))}
+            <tr style={{ borderTop: `1px solid ${C.border}` }}>
+              <td style={{ ...tdS, textAlign: 'left', color: C.textMuted, fontWeight: 700, fontSize: 11 }}>Total</td>
+              {totals.map((t, i) => (
+                <td key={i} style={{ ...tdS, color: C.teal, fontWeight: 700 }}>{t > 0 ? t : '—'}</td>
+              ))}
+              <td style={tdS}>
+                {(() => {
+                  const d = totals[3] - totals[2];
+                  return d === 0
+                    ? <span style={{ color: C.textMuted }}>—</span>
+                    : <span style={{ color: d > 0 ? C.green : C.red, fontWeight: 600 }}>{d > 0 ? '▲' : '▼'}{Math.abs(d)}</span>;
+                })()}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Pipeline Trends</div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <TrendTable title="Week over Week" headers={weeks} rows={wowRows} totals={wowTotals} />
+        <TrendTable title="Month over Month" headers={months} rows={momRows} totals={momTotals} />
+      </div>
+    </div>
+  );
+}
+
+// --- Pipeline Mini Charts (EHR, Source, Specialty) — clickable (Change 7) ---
+function PipelineCharts({ agg, filters, setFilters }) {
+  if (!agg) return null;
+
+  const toBarData = (obj) => Object.entries(obj || {})
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+
+  const ehrData     = toBarData(agg.byEhr);
+  const srcData     = toBarData(agg.bySource);
+  const specData    = (agg.topSpecialties || []).map((s) => ({ name: s.name, value: s.count }));
+
+  const handleEhrClick  = (name) => setFilters((f) => ({ ...f, ehr:      f.ehr?.[0] === name ? [] : [name] }));
+  const handleSrcClick  = (name) => setFilters((f) => ({ ...f, source:   f.source?.[0] === name ? [] : [name] }));
+  const handleSpecClick = (name) => setFilters((f) => ({ ...f, specialty: f.specialty?.[0] === name ? [] : [name] }));
+
+  const selectedEhr  = filters.ehr?.length === 1 ? filters.ehr[0] : null;
+  const selectedSrc  = filters.source?.length === 1 ? filters.source[0] : null;
+  const selectedSpec = filters.specialty?.length === 1 ? filters.specialty[0] : null;
+
+  const cardS = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px', flex: '1 1 220px', minWidth: 200 };
+  const titleS = { color: C.textSec, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 10 };
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Distribution · click to filter ↓</div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {ehrData.length > 0 && (
+          <div style={cardS}>
+            <div style={titleS}>By EHR</div>
+            <HBarChart data={ehrData} color={C.blue} maxItems={10} onBarClick={handleEhrClick} selectedName={selectedEhr} />
+          </div>
+        )}
+        {srcData.length > 0 && (
+          <div style={cardS}>
+            <div style={titleS}>By Source</div>
+            <HBarChart data={srcData} color={C.teal} maxItems={10} onBarClick={handleSrcClick} selectedName={selectedSrc} />
+          </div>
+        )}
+        {specData.length > 0 && (
+          <div style={cardS}>
+            <div style={titleS}>By Specialty (Top 10)</div>
+            <HBarChart data={specData} color={C.purple} maxItems={10} onBarClick={handleSpecClick} selectedName={selectedSpec} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function PipelineSection({ schema, pipelineData, isLoading, error, filters, setFilters, page, setPage }) {
   const [pipelineCols, togglePipelineCol, resetPipelineCols] =
     useColumnState('wt_pipeline_cols_v2', PIPELINE_DEFAULT_COLS);
   const [tableExpanded, setTableExpanded] = useState(false);
+
+  // Fetch activity data for WoW/MoM (Change 9)
+  const { data: activityData } = useSWR('/api/activity', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 5 * 60 * 1000,
+  });
 
   const schemaProps = schema?.pipeline?.properties || {};
   const propOrder   = schema?.pipeline?.propOrder  || [...PIPELINE_DEFAULT_COLS];
@@ -900,10 +1139,29 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
   const records     = pipelineData?.records;
   const meta        = pipelineData?.meta;
 
+  // StageFunnel click → toggle single-stage filter (Change 7)
+  const handleStageClick = (stage) => {
+    setFilters((f) => {
+      const cur = f.stage || [];
+      if (cur.length === 1 && cur[0] === stage) return { ...f, stage: NON_PROSPECT_STAGES };
+      return { ...f, stage: [stage] };
+    });
+  };
+  const selectedFunnelStage = (filters.stage?.length === 1) ? filters.stage[0] : null;
+
   return (
     <Section id="pipeline" title="🔭 Pipeline Tracking" accent={SECTION_ACCENT.pipeline}>
-      {/* Stage Funnel */}
-      {agg && <StageFunnel byStage={agg.byStage} />}
+      {/* Stage Funnel — clickable (Change 7) */}
+      {agg && (
+        <StageFunnel
+          byStage={agg.byStage}
+          onStageClick={handleStageClick}
+          selectedStage={selectedFunnelStage}
+        />
+      )}
+
+      {/* Mini distribution charts — clickable (Change 7) */}
+      {agg && <PipelineCharts agg={agg} filters={filters} setFilters={setFilters} />}
 
       {/* Filters */}
       <FiltersBar
@@ -912,6 +1170,9 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
         showingCount={meta?.total}
         defaultFilters={DEFAULT_PIPELINE_FILTERS}
       />
+
+      {/* WoW / MoM stage trend tables (Change 9) */}
+      <PipelineWowMom activityData={activityData} />
 
       {/* Error */}
       {error && (
@@ -971,17 +1232,107 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
 }
 
 // ─── Section 4: Activity ──────────────────────────────────────────────────────
+// Change 10: replaced WoW/MoM stage transitions with 4-metric × 4-period tables
 function ActivitySection() {
-  const [subTab, setSubTab] = useState('pipeline');
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo]     = useState('');
-  const [stageFilter, setStageFilter] = useState('');
+  const [subTab, setSubTab] = useState('activity');
 
   const { data, error, isLoading } = useSWR('/api/activity', fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 5 * 60 * 1000,
   });
+
+  const now = new Date();
+  const weeks  = getTrailingWeeks(4);
+  const months = getTrailingMonths(4);
+
+  const ACTIVITY_METRICS = [
+    {
+      label: 'Accounts Added',
+      desc: 'Date → Prospect',
+      stages: ['Prospect'],
+    },
+    {
+      label: 'Discos',
+      desc: 'Date → Discovery',
+      stages: ['Discovery'],
+    },
+    {
+      label: 'SQLs',
+      desc: 'Date → SQL',
+      stages: ['SQL'],
+    },
+    {
+      label: 'Closed-Won',
+      desc: 'Date → Closed-Won / Pilot / Full',
+      stages: ['Closed-Won', 'Pilot Deployment', 'Full Deployment'],
+    },
+  ];
+
+  const buildRows = (periods) => {
+    const items = data?.activity || [];
+    return ACTIVITY_METRICS.map((metric) => {
+      const counts = periods.map(({ start, end }) => countInPeriod(items, metric.stages, start, end));
+      const delta = counts[3] - counts[2];
+      return { ...metric, counts, delta };
+    });
+  };
+
+  const wowRows = data ? buildRows(weeks)  : null;
+  const momRows = data ? buildRows(months) : null;
+
+  const thS = {
+    padding: '6px 10px', textAlign: 'center', color: C.textMuted,
+    fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`,
+    textTransform: 'uppercase', letterSpacing: '0.3px', whiteSpace: 'nowrap',
+    background: C.surface,
+  };
+  const tdS = { padding: '6px 10px', textAlign: 'center', fontSize: 12, borderBottom: `1px solid ${C.border}1a` };
+
+  const DeltaCell = ({ delta }) => (
+    <td style={{ ...tdS }}>
+      {delta === 0
+        ? <span style={{ color: C.textMuted }}>—</span>
+        : <span style={{ color: delta > 0 ? C.green : C.red, fontWeight: 700 }}>{delta > 0 ? '▲' : '▼'}{Math.abs(delta)}</span>
+      }
+    </td>
+  );
+
+  const MetricTable = ({ title, periods, rows }) => (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', flex: '1 1 300px', minWidth: 280 }}>
+      <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, color: C.textSec, fontSize: 12, fontWeight: 600 }}>{title}</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thS, textAlign: 'left', width: 130 }}>Metric</th>
+              {periods.map((p) => <th key={p.label} style={thS}>{p.label}</th>)}
+              <th style={thS}>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <td style={{ ...tdS, textAlign: 'left' }}>
+                  <span style={{ color: C.textPri, fontWeight: 500, fontSize: 12 }}>{row.label}</span>
+                  <div style={{ color: C.textMuted, fontSize: 9 }}>{row.desc}</div>
+                </td>
+                {row.counts.map((c, i) => (
+                  <td key={i} style={{
+                    ...tdS,
+                    color: i === row.counts.length - 1 ? C.textPri : C.textSec,
+                    fontWeight: i === row.counts.length - 1 ? 700 : 400,
+                  }}>
+                    {c > 0 ? c : <span style={{ color: C.textMuted }}>—</span>}
+                  </td>
+                ))}
+                <DeltaCell delta={row.delta} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   const subTabBtn = (id, label) => (
     <button key={id} onClick={() => setSubTab(id)} style={{
@@ -993,22 +1344,10 @@ function ActivitySection() {
     }}>{label}</button>
   );
 
-  const tdStyle = { padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, fontSize: 12, color: C.textSec };
-  const thStyle = { padding: '8px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.4px' };
-
-  const filterActivity = (items) => {
-    let r = items || [];
-    if (dateFrom) r = r.filter((i) => i.transition_date >= dateFrom);
-    if (dateTo)   r = r.filter((i) => i.transition_date <= dateTo);
-    if (stageFilter) r = r.filter((i) => i.to_stage === stageFilter);
-    return r;
-  };
-
   return (
     <Section id="activity" title="⚡ Activity" accent={SECTION_ACCENT.activity}>
-      {/* Sub-tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-        {subTabBtn('pipeline', '📈 Pipeline Activity')}
+        {subTabBtn('activity', '📊 Activity Metrics')}
         {subTabBtn('outreach', '📬 Outreach & Contact Activity')}
       </div>
 
@@ -1025,7 +1364,7 @@ function ActivitySection() {
         </div>
       )}
 
-      {subTab === 'pipeline' && (
+      {subTab === 'activity' && (
         <>
           {isLoading && !data && (
             <div style={{ color: C.textMuted, textAlign: 'center', padding: '30px 0', fontSize: 13 }}>⟳ Loading activity…</div>
@@ -1033,119 +1372,11 @@ function ActivitySection() {
           {error && (
             <div style={{ color: C.red, fontSize: 13, marginBottom: 12 }}>⚠ Failed to load activity data.</div>
           )}
-
-          {data && (
-            <>
-              {/* Week over Week */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ color: C.textSec, fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
-                  Week over Week
-                  <span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11, marginLeft: 8 }}>
-                    This week: {data.weekly.this_week.length} moves · Prev week: {data.weekly.prev_week.length} moves
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {['this_week','prev_week'].map((key) => (
-                    <div key={key} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                      <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 600, padding: '8px 12px', borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                        {key === 'this_week' ? 'This Week (last 7d)' : 'Prev Week (8-14d ago)'}
-                      </div>
-                      {data.weekly[key].length === 0
-                        ? <div style={{ color: C.textMuted, fontSize: 12, padding: '12px', textAlign: 'center' }}>No stage changes</div>
-                        : <div style={{ overflowX: 'auto' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead><tr>
-                              {['Account','Stage','Date'].map((h) => <th key={h} style={thStyle}>{h}</th>)}
-                            </tr></thead>
-                            <tbody>
-                              {data.weekly[key].slice(0, 20).map((item, i) => (
-                                <tr key={i}>
-                                  <td style={tdStyle}><span style={{ color: C.textPri }}>{item.account_name}</span></td>
-                                  <td style={tdStyle}><SelectBadge value={item.to_stage} color={C.blue} small /></td>
-                                  <td style={{ ...tdStyle, color: C.textMuted }}>{formatDate(item.transition_date)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      }
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Month over Month */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ color: C.textSec, fontWeight: 600, fontSize: 13, marginBottom: 10 }}>Month over Month</div>
-                <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr>
-                        {['Stage','This Month','Last Month','Change'].map((h) => <th key={h} style={thStyle}>{h}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {PIPELINE_STAGES.map((stage) => {
-                          const tm = data.monthly.this_month[stage] || 0;
-                          const lm = data.monthly.last_month[stage] || 0;
-                          const diff = tm - lm;
-                          if (tm === 0 && lm === 0) return null;
-                          return (
-                            <tr key={stage}>
-                              <td style={tdStyle}><SelectBadge value={stage} color={C.blue} small /></td>
-                              <td style={{ ...tdStyle, color: C.textPri, fontWeight: 600 }}>{tm}</td>
-                              <td style={tdStyle}>{lm}</td>
-                              <td style={{ ...tdStyle, color: diff > 0 ? C.green : diff < 0 ? C.red : C.textMuted }}>
-                                {diff > 0 ? '+' : ''}{diff}
-                              </td>
-                            </tr>
-                          );
-                        }).filter(Boolean)}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-
-              {/* Custom Filter (collapsible) */}
-              <div style={{ marginBottom: 8 }}>
-                <button onClick={() => setFilterOpen((o) => !o)} style={{
-                  background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', fontSize: 12,
-                  display: 'flex', alignItems: 'center', gap: 6, padding: 0,
-                }}>
-                  {filterOpen ? '▼' : '▶'} Custom filter
-                </button>
-                {filterOpen && (
-                  <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 16px', marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-                    <div>
-                      <label style={{ color: C.textMuted, fontSize: 11 }}>From</label>
-                      <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-                        style={{ display: 'block', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', color: C.textSec, fontSize: 12, marginTop: 3 }} />
-                    </div>
-                    <div>
-                      <label style={{ color: C.textMuted, fontSize: 11 }}>To</label>
-                      <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-                        style={{ display: 'block', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 8px', color: C.textSec, fontSize: 12, marginTop: 3 }} />
-                    </div>
-                    <div>
-                      <label style={{ color: C.textMuted, fontSize: 11 }}>Stage</label>
-                      <select value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}
-                        style={{ display: 'block', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px', color: C.textSec, fontSize: 12, marginTop: 3 }}>
-                        <option value="">All stages</option>
-                        {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    {(dateFrom || dateTo || stageFilter) && (
-                      <div style={{ alignSelf: 'flex-end' }}>
-                        <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 3 }}>Results</div>
-                        <div style={{ color: C.textSec, fontSize: 12 }}>
-                          {filterActivity(data?.activity).length} transitions
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
+          {data && wowRows && momRows && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <MetricTable title="Week over Week (ISO weeks)" periods={weeks} rows={wowRows} />
+              <MetricTable title="Month over Month" periods={months} rows={momRows} />
+            </div>
           )}
         </>
       )}
@@ -1153,20 +1384,38 @@ function ActivitySection() {
   );
 }
 
+
 // ─── Market Account List (collapsible, used in Market Overview) ───────────────
-function MarketAccountList({ globals }) {
+// Change 7/8: accepts chartFilter prop to auto-filter from chart clicks
+function MarketAccountList({ globals, chartFilter }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [localFilters, setLocalFilters] = useState({});
 
   const buildUrl = () => {
     const p = new URLSearchParams({ page, pageSize: 50 });
-    if (localFilters.ehr?.length)      p.set('ehr',      localFilters.ehr.join(','));
-    if (localFilters.specialty?.length) p.set('specialty', localFilters.specialty.join(','));
-    if (localFilters.source?.length)   p.set('source',   localFilters.source.join(','));
-    if (localFilters.stage?.length)    p.set('stage',    localFilters.stage.join(','));
+    // local manual filters
+    if (localFilters.ehr?.length)       p.set('ehr',           localFilters.ehr.join(','));
+    if (localFilters.specialty?.length) p.set('specialty',     localFilters.specialty.join(','));
+    if (localFilters.source?.length)    p.set('source',        localFilters.source.join(','));
+    if (localFilters.stage?.length)     p.set('stage',         localFilters.stage.join(','));
+    if (localFilters.employeeBucket?.length) p.set('employeeBucket', localFilters.employeeBucket.join(','));
+    // chart-driven filter overrides (if set)
+    if (chartFilter?.dim && chartFilter?.value) {
+      const { dim, value } = chartFilter;
+      if (dim === 'ehr')            { if (!localFilters.ehr?.length)       p.set('ehr',            value); }
+      else if (dim === 'source')    { if (!localFilters.source?.length)    p.set('source',         value); }
+      else if (dim === 'specialty') { if (!localFilters.specialty?.length) p.set('specialty',      value); }
+      else if (dim === 'stage')     { if (!localFilters.stage?.length)     p.set('stage',          value); }
+      else if (dim === 'employee')  { if (!localFilters.employeeBucket?.length) p.set('employeeBucket', value); }
+      else if (dim === 'revenue')   p.set('revenueBucket',  value);
+      else if (dim === 'provider')  p.set('providerBucket', value);
+    }
     return `/api/pipeline?${p}`;
   };
+
+  // Reset page when filters or chartFilter change
+  useEffect(() => { setPage(1); }, [localFilters, chartFilter]);
 
   const { data, isLoading } = useSWR(
     expanded ? buildUrl() : null,
@@ -1174,15 +1423,12 @@ function MarketAccountList({ globals }) {
     { revalidateOnFocus: false, dedupingInterval: 10000 }
   );
 
-  useEffect(() => { setPage(1); }, [localFilters]);
-
   const total = data?.meta?.total ?? 0;
   const records = data?.records || [];
   const meta = data?.meta;
 
   const statsForOptions = globals?.stats;
   const ehrOptions  = statsForOptions ? Object.keys(statsForOptions.byEhr || {}).sort() : [];
-  const srcOptions  = statsForOptions ? Object.keys(statsForOptions.bySource || {}).sort() : [];
   const empBuckets  = ['1-25','26-100','101-500','500+'];
 
   const mktCols = ['Account Name','EHR','Stage','Specialty','Source Category','Employees #','Annual Revenue ($)','Providers #'];
@@ -1229,6 +1475,16 @@ function MarketAccountList({ globals }) {
 
       {expanded && (
         <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden', background: C.card }}>
+          {/* Chart filter banner */}
+          {chartFilter?.dim && chartFilter?.value && (
+            <div style={{ padding: '6px 14px', background: C.teal + '15', borderBottom: `1px solid ${C.teal}33`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: C.teal, fontSize: 11 }}>
+                🔵 Chart filter active: <strong>{chartFilter.dim}</strong> = <strong>{chartFilter.value}</strong>
+              </span>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>· click the chart bar again to clear</span>
+            </div>
+          )}
+
           {/* Mini filters */}
           <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <span style={{ color: C.textMuted, fontSize: 11 }}>Filter:</span>
@@ -1316,28 +1572,59 @@ function MarketAccountList({ globals }) {
 }
 
 // ─── Section 5: Market Overview ───────────────────────────────────────────────
-function HBarChart({ data, color, maxItems = 15 }) {
+function HBarChart({ data, color, maxItems = 15, onBarClick, selectedName }) {
   const items = data.slice(0, maxItems);
   const maxVal = Math.max(...items.map((d) => d.value), 1);
+  const isClickable = !!onBarClick;
 
   return (
     <div>
-      {items.map((item, i) => (
-        <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <div style={{ color: C.textSec, fontSize: 11, width: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, textAlign: 'right' }} title={item.name}>
-            {item.name}
-          </div>
-          <div style={{ flex: 1, height: 16, background: C.surface, borderRadius: 3, overflow: 'hidden' }}>
+      {items.map((item) => {
+        const isSelected = selectedName === item.name;
+        return (
+          <div
+            key={item.name}
+            onClick={() => isClickable && onBarClick(item.name)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+              cursor: isClickable ? 'pointer' : 'default',
+              borderRadius: 4,
+              background: isSelected ? color + '18' : 'transparent',
+              outline: isSelected ? `1px solid ${color}55` : 'none',
+              padding: isSelected ? '1px 3px' : '1px 3px',
+              transition: 'background 0.15s',
+            }}
+          >
             <div style={{
-              height: '100%', borderRadius: 3,
-              background: `linear-gradient(90deg, ${color}99, ${color})`,
-              width: `${Math.max(2, (item.value / maxVal) * 100)}%`,
-              transition: 'width 0.4s ease',
-            }} />
+              color: isSelected ? color : C.textSec,
+              fontSize: 11, width: 130,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              flexShrink: 0, textAlign: 'right',
+              fontWeight: isSelected ? 600 : 400,
+            }} title={item.name}>
+              {item.name}
+            </div>
+            <div style={{ flex: 1, height: 16, background: C.surface, borderRadius: 3, overflow: 'hidden', border: isSelected ? `1px solid ${color}66` : '1px solid transparent' }}>
+              <div style={{
+                height: '100%', borderRadius: 3,
+                background: `linear-gradient(90deg, ${color}99, ${color})`,
+                width: `${Math.max(2, (item.value / maxVal) * 100)}%`,
+                transition: 'width 0.4s ease',
+                opacity: isSelected ? 1 : 0.75,
+              }} />
+            </div>
+            <div style={{ color: isSelected ? color : C.textMuted, fontSize: 11, width: 40, textAlign: 'right', fontWeight: isSelected ? 600 : 400 }}>{item.value.toLocaleString()}</div>
           </div>
-          <div style={{ color: C.textMuted, fontSize: 11, width: 40, textAlign: 'right' }}>{item.value.toLocaleString()}</div>
-        </div>
-      ))}
+        );
+      })}
+      {isClickable && selectedName && (
+        <button
+          onClick={() => onBarClick(selectedName)}
+          style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 10, cursor: 'pointer', padding: '2px 0', marginTop: 2 }}
+        >
+          ✕ Clear filter
+        </button>
+      )}
     </div>
   );
 }
@@ -1395,6 +1682,17 @@ function MarketOverviewSection({ globals }) {
   const [rowDim, setRowDim] = useState('EHR');
   const [colDim, setColDim] = useState('Stage');
 
+  // Chart-driven filter for MarketAccountList (Change 7/8/11)
+  const [chartFilter, setChartFilter] = useState({ dim: null, value: null });
+
+  const handleChartClick = (dim, value) => {
+    setChartFilter((prev) =>
+      prev.dim === dim && prev.value === value
+        ? { dim: null, value: null }  // toggle off
+        : { dim, value }
+    );
+  };
+
   if (!globals?.stats) return null;
   const { stats } = globals;
 
@@ -1402,13 +1700,20 @@ function MarketOverviewSection({ globals }) {
   const estimatedTAM = total * 150_000;
 
   const toBarData = (obj) => Object.entries(obj || {})
+    .filter(([, v]) => v > 0)
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 
   const empOrder = ['1-25','26-100','101-500','500+','Unknown'];
   const empData = empOrder.map((k) => ({ name: k, value: stats.byEmployeeBucket?.[k] || 0 })).filter((d) => d.value > 0);
 
-  const dimSelect = (val, onChange, label) => (
+  const revOrder = ['<$1M','$1M-$5M','$5M-$10M','$10M-$25M','$25M+','Unknown'];
+  const revData  = revOrder.map((k) => ({ name: k, value: stats.byRevenueBucket?.[k] || 0 })).filter((d) => d.value > 0);
+
+  const provOrder = ['1-5','6-15','16-30','31-50','50+','Unknown'];
+  const provData  = provOrder.map((k) => ({ name: k, value: stats.byProviderBucket?.[k] || 0 })).filter((d) => d.value > 0);
+
+  const dimSelect = (val, onChange) => (
     <select value={val} onChange={(e) => onChange(e.target.value)} style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
       padding: '4px 10px', color: C.textSec, fontSize: 12,
@@ -1419,55 +1724,106 @@ function MarketOverviewSection({ globals }) {
 
   const chartCard = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px' };
   const chartTitle = { color: C.textSec, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 12 };
+  const chartSubtitle = { ...chartTitle, color: C.textMuted, fontWeight: 400, fontSize: 10, marginBottom: 4 };
+
+  const isChartSelected = (dim, name) => chartFilter.dim === dim && chartFilter.value === name;
 
   return (
     <Section id="overview" title="🌍 Addressable Market Overview" accent={SECTION_ACCENT.overview}>
       {/* Header stat */}
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 8 }}>
         <span style={{ color: C.teal, fontWeight: 700, fontSize: 18 }}>{total.toLocaleString()}</span>
         <span style={{ color: C.textSec, fontSize: 14 }}> accounts in ICP · </span>
         <span style={{ color: C.teal, fontWeight: 700, fontSize: 18 }}>Est. {fmt(estimatedTAM, 'currency')}</span>
         <span style={{ color: C.textSec, fontSize: 14 }}> TAM</span>
       </div>
+      <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 16 }}>
+        Click any chart bar to filter the account list below. Click again to clear.
+        {chartFilter.dim && (
+          <span style={{ color: C.teal, marginLeft: 8 }}>
+            Active: <strong>{chartFilter.dim}</strong> = <strong>{chartFilter.value}</strong>
+            <button onClick={() => setChartFilter({ dim: null, value: null })}
+              style={{ background: 'none', border: 'none', color: C.teal, cursor: 'pointer', fontSize: 11, marginLeft: 4 }}>✕</button>
+          </span>
+        )}
+      </div>
 
-      {/* Charts grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 16 }}>
+      {/* Charts grid — 4 original charts (Change 7/8 clickable) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
         <div style={chartCard}>
           <div style={chartTitle}>By Source Category</div>
-          <HBarChart data={toBarData(stats.bySource)} color={C.teal} />
+          <HBarChart
+            data={toBarData(stats.bySource)} color={C.teal}
+            onBarClick={(name) => handleChartClick('source', name)}
+            selectedName={chartFilter.dim === 'source' ? chartFilter.value : null}
+          />
         </div>
         <div style={chartCard}>
           <div style={chartTitle}>By EHR</div>
-          <HBarChart data={toBarData(stats.byEhr)} color={C.blue} />
+          <HBarChart
+            data={toBarData(stats.byEhr)} color={C.blue}
+            onBarClick={(name) => handleChartClick('ehr', name)}
+            selectedName={chartFilter.dim === 'ehr' ? chartFilter.value : null}
+          />
         </div>
         <div style={chartCard}>
           <div style={chartTitle}>By Specialty (Top 15)</div>
-          <HBarChart data={toBarData(stats.bySpecialty)} color={C.purple} maxItems={15} />
+          <HBarChart
+            data={toBarData(stats.bySpecialty)} color={C.purple} maxItems={15}
+            onBarClick={(name) => handleChartClick('specialty', name)}
+            selectedName={chartFilter.dim === 'specialty' ? chartFilter.value : null}
+          />
         </div>
         <div style={chartCard}>
           <div style={chartTitle}>By Employee Size</div>
-          <HBarChart data={empData} color={C.green} />
+          <HBarChart
+            data={empData} color={C.green}
+            onBarClick={(name) => handleChartClick('employee', name)}
+            selectedName={chartFilter.dim === 'employee' ? chartFilter.value : null}
+          />
+        </div>
+      </div>
+
+      {/* Change 11: Revenue Bucket + Provider Bucket charts */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <div style={chartCard}>
+          <div style={chartTitle}>Revenue Bucket Distribution</div>
+          <div style={{ color: C.textMuted, fontSize: 10, marginBottom: 8 }}>Annual Revenue ($)</div>
+          <HBarChart
+            data={revData} color={C.amber}
+            onBarClick={(name) => handleChartClick('revenue', name)}
+            selectedName={chartFilter.dim === 'revenue' ? chartFilter.value : null}
+          />
+        </div>
+        <div style={chartCard}>
+          <div style={chartTitle}>Provider Bucket Distribution</div>
+          <div style={{ color: C.textMuted, fontSize: 10, marginBottom: 8 }}>Providers #</div>
+          <HBarChart
+            data={provData} color={C.pink}
+            onBarClick={(name) => handleChartClick('provider', name)}
+            selectedName={chartFilter.dim === 'provider' ? chartFilter.value : null}
+          />
         </div>
       </div>
 
       {/* Crosstab */}
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px' }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px', marginBottom: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
           <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>Custom Crosstab</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: C.textMuted, fontSize: 12 }}>Rows:</span>
-            {dimSelect(rowDim, setRowDim, 'Row')}
+            {dimSelect(rowDim, setRowDim)}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: C.textMuted, fontSize: 12 }}>Cols:</span>
-            {dimSelect(colDim, setColDim, 'Col')}
+            {dimSelect(colDim, setColDim)}
           </div>
         </div>
         <CrosstabMatrix rowDim={rowDim} colDim={colDim} />
       </div>
 
-      {/* Collapsible full account list */}
-      <MarketAccountList globals={globals} />
+      {/* Collapsible full account list — receives chart filter (Change 7/8/11) */}
+      <MarketAccountList globals={globals} chartFilter={chartFilter} />
     </Section>
   );
 }
@@ -1611,9 +1967,15 @@ export default function Home() {
   );
 
   // Stats (fast endpoint — returns immediately even on cold start)
+  // Note: refreshInterval cannot reference statsData (TDZ), so we use a ref-based approach
+  const [statsRefreshMs, setStatsRefreshMs] = useState(5000); // start fast, slow down once warm
   const { data: statsData } = useSWR('/api/stats', fetcher, {
     revalidateOnFocus: false,
-    refreshInterval: statsData?.loading ? 5000 : 60_000, // poll every 5s until warm
+    refreshInterval: statsRefreshMs,
+    onSuccess: (data) => {
+      // Once data loads and isn't in loading state, switch to 60s refresh
+      if (!data?.loading) setStatsRefreshMs(60_000);
+    },
   });
 
   // Schema

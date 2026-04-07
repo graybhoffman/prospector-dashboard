@@ -63,6 +63,8 @@ function computeStats(allRecords) {
   let notRcmCount = 0, confirmedIcpCount = 0, roeCount = 0;
   const byStage = {}, byEhr = {}, bySpecialty = {}, bySource = {};
   const employeeBuckets = { '1-25': 0, '26-100': 0, '101-500': 0, '500+': 0 };
+  const byRevenueBucket  = { '<$1M': 0, '$1M-$5M': 0, '$5M-$10M': 0, '$10M-$25M': 0, '$25M+': 0, 'Unknown': 0 };
+  const byProviderBucket = { '1-5': 0, '6-15': 0, '16-30': 0, '31-50': 0, '50+': 0, 'Unknown': 0 };
 
   for (const { fields } of allRecords) {
     if (fields['Not in RCM ICP'] === true) notRcmCount++;
@@ -90,9 +92,25 @@ function computeStats(allRecords) {
     else if (e <= 100) employeeBuckets['26-100']++;
     else if (e <= 500) employeeBuckets['101-500']++;
     else if (e > 500) employeeBuckets['500+']++;
+
+    // Revenue bucket
+    if (!rev || rev === 0) byRevenueBucket['Unknown']++;
+    else if (rev < 1_000_000) byRevenueBucket['<$1M']++;
+    else if (rev < 5_000_000) byRevenueBucket['$1M-$5M']++;
+    else if (rev < 10_000_000) byRevenueBucket['$5M-$10M']++;
+    else if (rev < 25_000_000) byRevenueBucket['$10M-$25M']++;
+    else byRevenueBucket['$25M+']++;
+
+    // Provider bucket
+    if (!prov || prov === 0) byProviderBucket['Unknown']++;
+    else if (prov <= 5) byProviderBucket['1-5']++;
+    else if (prov <= 15) byProviderBucket['6-15']++;
+    else if (prov <= 30) byProviderBucket['16-30']++;
+    else if (prov <= 50) byProviderBucket['31-50']++;
+    else byProviderBucket['50+']++;
   }
 
-  return { total, notRcmCount, confirmedIcpCount, roeCount, byStage, byEhr, bySpecialty, bySource, employeeBuckets };
+  return { total, notRcmCount, confirmedIcpCount, roeCount, byStage, byEhr, bySpecialty, bySource, employeeBuckets, byRevenueBucket, byProviderBucket };
 }
 
 export default async function handler(req, res) {

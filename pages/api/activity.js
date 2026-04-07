@@ -50,14 +50,13 @@ export default async function handler(req, res) {
   // Day boundaries
   const d7  = new Date(now); d7.setDate(d7.getDate() - 7);   d7.setHours(0,0,0,0);
   const d14 = new Date(now); d14.setDate(d14.getDate() - 14); d14.setHours(0,0,0,0);
-  const d30 = new Date(now); d30.setDate(d30.getDate() - 30); d30.setHours(0,0,0,0);
 
   // Month boundaries
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
 
-  const activity     = [];
+  const activity     = []; // ALL stage transitions (no date cap) — used for WoW/MoM client-side
   const thisWeek     = [];
   const prevWeek     = [];
   const thisMonthCounts = {};
@@ -77,14 +76,14 @@ export default async function handler(req, res) {
 
       const entry = { account_name: accountName, to_stage: stage, transition_date: dateStr, ehr };
 
-      // Last 30 days for main activity feed
-      if (dMs >= d30.getTime()) activity.push(entry);
+      // All transitions — client does its own bucketing
+      activity.push(entry);
 
-      // Weekly
+      // Legacy weekly (last 7 days vs 8-14 days ago)
       if (dMs >= d7.getTime()) thisWeek.push(entry);
       else if (dMs >= d14.getTime() && dMs < d7.getTime()) prevWeek.push(entry);
 
-      // Monthly
+      // Legacy monthly
       if (d >= thisMonthStart) {
         thisMonthCounts[stage] = (thisMonthCounts[stage] || 0) + 1;
       } else if (d >= lastMonthStart && d <= lastMonthEnd) {
@@ -100,7 +99,7 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     cachedAt: new Date(pipelineCache.fetchedAt).toISOString(),
-    activity: activity.slice(0, 200), // cap for response size
+    activity, // all stage transitions, no cap — used for WoW/MoM client-side
     weekly: {
       this_week: thisWeek.slice(0, 100),
       prev_week: prevWeek.slice(0, 100),
