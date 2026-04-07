@@ -3,9 +3,13 @@
  * Fetches all pages from the Notion pipeline DB, caches them in memory
  * for 5 minutes, and returns aggregated stats + paginated records.
  *
+ * EHR field: Notion property named "EHR" (type: select)
+ *   → props["EHR"]["select"]["name"]
+ *   (NOT Source Sub-category — that's for lead source tracking)
+ *
  * Query params:
  *   page       (default 1)
- *   pageSize   (default 100)
+ *   pageSize   (default 50)
  *   ehr        filter by EHR name
  *   stage      filter by Stage
  *   specialty  filter by Specialty
@@ -112,8 +116,8 @@ async function fetchAllNotionPages() {
                     || '(unnamed)',
         stage:         getProp(props, 'Stage',                     'select'),
         sourceCategory:getProp(props, 'Source Category',           'select'),
-        ehr:           getProp(props, 'Source Sub-category',       'select')
-                    || getProp(props, 'EHR',                       'select'),
+        // EHR is a dedicated select field — NOT Source Sub-category
+        ehr:           getProp(props, 'EHR',                       'select'),
         specialty:     getProp(props, 'Specialty',                 'select')
                     || getProp(props, 'Specialties',               'multi_select'),
         notInRcmIcp:   getProp(props, 'Not in RCM ICP',           'checkbox'),

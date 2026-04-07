@@ -1,9 +1,10 @@
 /**
- * Prospector — Pipeline Dashboard
+ * Watchtower — Pipeline Dashboard
  * Dark-themed React dashboard for Commure's Call Center Agents team.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Head from 'next/head';
 import useSWR from 'swr';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
@@ -460,13 +461,17 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.textPri, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <Head>
+        <title>🗼 Watchtower — Pipeline Dashboard</title>
+        <meta name="description" content="Commure Call Center Agents — Pipeline KPI Dashboard" />
+      </Head>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px' }}>
 
         {/* ── Header ── */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: C.textPri }}>
-              ⛏️ Prospector — Pipeline Dashboard
+              🗼 Watchtower — Pipeline Dashboard
             </h1>
             <div style={{ color: C.textMuted, fontSize: 12, marginTop: 4 }}>
               Commure Call Center Agents · Last updated: {lastUpdated}

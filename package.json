@@ -1,7 +1,7 @@
 {
-  "name": "prospector-dashboard",
+  "name": "watchtower-dashboard",
   "version": "1.0.0",
-  "description": "Commure Call Center Agents - Pipeline KPI Dashboard",
+  "description": "Commure Call Center Agents - Watchtower Pipeline KPI Dashboard",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
