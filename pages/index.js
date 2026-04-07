@@ -243,10 +243,24 @@ function ProgressBar({ value, max, color = C.accent, height = 8 }) {
 }
 
 // ─── Section 1: Goals ─────────────────────────────────────────────────────────
-function GoalsSection({ globals, currentMonth }) {
-  if (!globals) return <div style={{ color: C.textMuted, fontSize: 13 }}>Loading goals…</div>;
-  const { goals } = globals;
-  if (!goals) return null;
+function SkeletonBar({ width = '100%', height = 12, mb = 8 }) {
+  return <div style={{ width, height, background: C.surface, borderRadius: 6, marginBottom: mb, opacity: 0.6 }} />;
+}
+
+function GoalsSection({ globals, currentMonth, statsLoading }) {
+  const isLoading = statsLoading || !globals?.goals;
+  const goals = globals?.goals;
+
+  if (isLoading) {
+    return (
+      <Section id="goals" title="🎯 Goals & Progress" accent={SECTION_ACCENT.goals} subtitle="Loading…">
+        <SkeletonBar height={14} mb={12} />
+        <SkeletonBar width="70%" height={10} mb={20} />
+        <SkeletonBar height={14} mb={12} />
+        <SkeletonBar width="55%" height={10} />
+      </Section>
+    );
+  }
 
   const g1 = goals.discoveryPlusThisMonth || 0;
   const g2 = goals.closedWonThisMonth || 0;
@@ -290,9 +304,22 @@ function GoalsSection({ globals, currentMonth }) {
 }
 
 // ─── Section 2: Market Summary ────────────────────────────────────────────────
-function MarketSummarySection({ globals }) {
+function MarketSummarySection({ globals, statsLoading }) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
-  if (!globals?.stats) return null;
+  if (statsLoading || !globals?.stats) {
+    return (
+      <Section id="market" title="📊 Market Summary" accent={SECTION_ACCENT.market} defaultOpen={true}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {[1,2,3,4,5].map(i => (
+            <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', flex: '1 1 140px', minWidth: 120 }}>
+              <SkeletonBar width="60%" height={9} mb={8} />
+              <SkeletonBar width="80%" height={22} mb={4} />
+            </div>
+          ))}
+        </div>
+      </Section>
+    );
+  }
   const { stats } = globals;
 
   const statCards = [
@@ -1325,14 +1352,24 @@ export default function Home() {
     pipelineUrl, fetcher, { revalidateOnFocus: false, dedupingInterval: 5000 }
   );
 
+  // Stats (fast endpoint — returns immediately even on cold start)
+  const { data: statsData } = useSWR('/api/stats', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: statsData?.loading ? 5000 : 60_000, // poll every 5s until warm
+  });
+
   // Schema
   const { data: schema } = useSWR('/api/schema', fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 10 * 60 * 1000,
   });
 
-  const globals      = pipelineData?.globals;
-  const currentMonth = pipelineData?.meta?.currentMonth;
+  // Prefer fresh globals from pipeline response; fall back to stats endpoint
+  const globals      = pipelineData?.globals ?? (statsData?.loading === false ? statsData : null);
+  const statsLoading = !statsData || statsData.loading;
+  const currentMonth = pipelineData?.meta?.currentMonth ?? (() => {
+    const d = new Date(); return d.toLocaleString('default', { month: 'long', year: 'numeric' });
+  })();
 
   const tabBtn = (id, label) => (
     <button
@@ -1395,8 +1432,8 @@ export default function Home() {
         {/* ── Pipeline Tab ── */}
         {activeTab === 'pipeline' && (
           <>
-            <GoalsSection globals={globals} currentMonth={currentMonth} />
-            <MarketSummarySection globals={globals} />
+            <GoalsSection globals={globals} currentMonth={currentMonth} statsLoading={statsLoading} />
+            <MarketSummarySection globals={globals} statsLoading={statsLoading} />
             <PipelineSection
               schema={schema}
               pipelineData={pipelineData}
