@@ -15,20 +15,47 @@ function cors(res) {
 }
 
 function computeGoals(allRecords) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  let discoveryPlusThisMonth = 0;
-  let closedWonThisMonth = 0;
+  let discoveryPlus = 0;
+  let closedWon = 0;
+  let deployedRevenue = 0;
+
+  const discoveryDateFields = [
+    'Date → Discovery','Date → SQL','Date → Negotiations',
+    'Date → Closed-Won','Date → Pilot Deployment','Date → Full Deployment',
+  ];
+
   for (const { fields } of allRecords) {
-    const stages = ['Discovery','SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment'];
-    for (const stage of stages) {
-      const d = fields[`Date → ${stage}`];
-      if (d && String(d).startsWith(yearMonth)) { discoveryPlusThisMonth++; break; }
+    // Discovery+: any stage date field is filled = ever reached Discovery or beyond
+    const hasReachedDiscovery = discoveryDateFields.some((f) => {
+      const v = fields[f];
+      return v && String(v).trim();
+    });
+    if (hasReachedDiscovery) discoveryPlus++;
+
+    // Closed-Won: Stage is Closed-Won, Pilot Deployment, or Full Deployment
+    const stage = fields['Stage'];
+    if (stage === 'Closed-Won' || stage === 'Pilot Deployment' || stage === 'Full Deployment') {
+      closedWon++;
     }
-    const cwDate = fields['Date → Closed-Won'];
-    if (cwDate && String(cwDate).startsWith(yearMonth)) closedWonThisMonth++;
+
+    // Deployed Revenue: sum ACV for Pilot/Full Deployment; default $150K if blank
+    if (stage === 'Pilot Deployment' || stage === 'Full Deployment') {
+      const acv = fields['ACV ($)'] || fields['ACV'] || 0;
+      deployedRevenue += (acv && acv > 0) ? acv : 150_000;
+    }
   }
-  return { discoveryPlusThisMonth, closedWonThisMonth, goal1Target: 35, goal2Target: 7 };
+
+  // Floor at known confirmed minimum ($575K Nathan Littauer + $75K Medvanta)
+  deployedRevenue = Math.max(650_000, deployedRevenue);
+
+  return {
+    discoveryPlus,
+    closedWon,
+    deployedRevenue,
+    goal1Target: 35,
+    goal2Target: 7,
+    goal3Target: 300_000,
+  };
 }
 
 function computeStats(allRecords) {
@@ -99,7 +126,7 @@ export default async function handler(req, res) {
     stale: true,
     recordCount: 0,
     fetchedAt: null,
-    goals: { discoveryPlusThisMonth: null, closedWonThisMonth: null, goal1Target: 35, goal2Target: 7 },
+    goals: { discoveryPlus: null, closedWon: null, deployedRevenue: null, goal1Target: 35, goal2Target: 7, goal3Target: 300_000 },
     stats: { total: null, notRcmCount: null, confirmedIcpCount: null, roeCount: null },
   });
 }

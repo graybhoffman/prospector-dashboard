@@ -57,6 +57,10 @@ const PIPELINE_STAGES = [
   'Closed-Won','Pilot Deployment','Full Deployment',
 ];
 
+// Default filter excludes Prospects
+const NON_PROSPECT_STAGES = PIPELINE_STAGES.filter((s) => s !== 'Prospect');
+const DEFAULT_PIPELINE_FILTERS = { stage: NON_PROSPECT_STAGES };
+
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
 const PIPELINE_DEFAULT_COLS = new Set([
@@ -262,23 +266,28 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
     );
   }
 
-  const g1 = goals.discoveryPlusThisMonth || 0;
-  const g2 = goals.closedWonThisMonth || 0;
+  const g1 = goals.discoveryPlus ?? goals.discoveryPlusThisMonth ?? 0;
+  const g2 = goals.closedWon ?? goals.closedWonThisMonth ?? 0;
+  const g3 = goals.deployedRevenue ?? 0;
   const t1 = goals.goal1Target || 35;
   const t2 = goals.goal2Target || 7;
+  const t3 = goals.goal3Target || 300_000;
 
-  function GoalRow({ label, current, target, color }) {
+  function GoalRow({ label, current, target, color, format = 'number' }) {
     const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
     const toGo = Math.max(0, target - current);
+    const displayValue  = format === 'currency' ? fmt(current, 'currency') : current;
+    const displayTarget = format === 'currency' ? fmt(target, 'currency') : target;
+    const toGoDisplay   = format === 'currency' ? fmt(toGo, 'currency') : toGo;
     return (
       <div style={{ marginBottom: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <span style={{ color: C.textPri, fontSize: 13, fontWeight: 600 }}>{label}</span>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span style={{ color, fontWeight: 700, fontSize: 15 }}>{current}<span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12 }}>/{target}</span></span>
+            <span style={{ color, fontWeight: 700, fontSize: 15 }}>{displayValue}<span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12 }}>/{displayTarget}</span></span>
             <SelectBadge value={`${pct}%`} color={color} />
             {toGo > 0
-              ? <span style={{ color: C.textMuted, fontSize: 12 }}>{toGo} to go</span>
+              ? <span style={{ color: C.textMuted, fontSize: 12 }}>{toGoDisplay} to go</span>
               : <span style={{ color: C.green, fontSize: 12, fontWeight: 600 }}>✓ Goal met!</span>
             }
           </div>
@@ -290,14 +299,18 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
 
   return (
     <Section id="goals" title="🎯 Goals & Progress" accent={SECTION_ACCENT.goals}
-      subtitle={`${currentMonth || ''} · Resets monthly`}>
+      subtitle="Target: July 31, 2026 · Cumulative from inception">
       <GoalRow
-        label="New accounts moved to Discovery stage or beyond"
+        label="Accounts moved to Discovery stage or beyond (cumulative)"
         current={g1} target={t1} color={C.purple}
       />
       <GoalRow
-        label="New Closed-Won accounts"
+        label="Closed-Won accounts (incl. Pilot &amp; Full Deployment)"
         current={g2} target={t2} color={C.green}
+      />
+      <GoalRow
+        label="Deployed ARR"
+        current={g3} target={t3} color={C.amber} format="currency"
       />
     </Section>
   );
@@ -356,16 +369,42 @@ function MarketSummarySection({ globals, statsLoading }) {
           ℹ️ What&apos;s included
         </button>
         {tooltipOpen && (
-          <div style={{
-            position: 'absolute', left: 0, top: '100%', marginTop: 6,
-            background: C.card, border: `1px solid ${C.border}`,
-            borderRadius: 8, padding: '10px 14px', fontSize: 12, color: C.textSec,
-            width: 340, zIndex: 50, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-          }}>
-            All accounts in the Voice Agents Pipeline Notion DB. ICP criteria: healthcare practice, target EHR (eCW/Athena/ModMed/AdvancedMD/MEDITECH), $1M+ revenue OR 5+ locations OR 25+ employees.
-            <br /><br />
-            <strong style={{ color: C.textPri }}>Confirmed ICP tier:</strong> Annual Revenue ≥ $10M OR Providers # ≥ 50 OR Employees # ≥ 100 OR # of locations ≥ 10.
-          </div>
+          <>
+            {/* Backdrop */}
+            <div
+              onClick={() => setTooltipOpen(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9998 }}
+            />
+            {/* Modal */}
+            <div style={{
+              position: 'fixed',
+              top: '50%', left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 12, padding: '20px 24px',
+              fontSize: 13, color: C.textSec,
+              width: 420, maxWidth: '90vw',
+              zIndex: 9999, boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <span style={{ color: C.textPri, fontWeight: 700, fontSize: 14 }}>What&apos;s included</span>
+                <button onClick={() => setTooltipOpen(false)} style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>✕</button>
+              </div>
+              <p style={{ margin: '0 0 10px 0', lineHeight: 1.6 }}>
+                All accounts in the <strong style={{ color: C.textPri }}>Voice Agents Pipeline</strong> Notion DB.
+              </p>
+              <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>ICP criteria:</p>
+              <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, lineHeight: 1.8 }}>
+                <li>Healthcare practice (not a vendor/tech company)</li>
+                <li>Target EHR: eCW, Athena, ModMed, AdvancedMD, or MEDITECH</li>
+                <li>$1M+ revenue OR 5+ locations OR 25+ employees</li>
+              </ul>
+              <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>Deployed ARR:</p>
+              <p style={{ margin: 0, lineHeight: 1.6 }}>
+                Nathan Littauer Hospital (<span style={{ color: C.green }}>$575K</span>) + Medvanta (<span style={{ color: C.green }}>$75K</span>) = <strong style={{ color: C.green }}>$650K</strong> actual
+              </p>
+            </div>
+          </>
         )}
       </div>
     </Section>
@@ -503,7 +542,7 @@ function MultiSelect({ label, options, selected, onChange }) {
 }
 
 // ─── Filters Bar ──────────────────────────────────────────────────────────────
-function FiltersBar({ filters, setFilters, schemaProps, showingCount }) {
+function FiltersBar({ filters, setFilters, schemaProps, showingCount, defaultFilters }) {
   const [searchInput, setSearchInput] = useState(filters.search || '');
   const debRef = useRef(null);
 
@@ -521,8 +560,25 @@ function FiltersBar({ filters, setFilters, schemaProps, showingCount }) {
     padding: '5px 10px', fontSize: 12, cursor: 'pointer', outline: 'none',
   };
 
-  const clear = () => { setFilters({}); setSearchInput(''); };
-  const hasFilters = Object.values(filters).some((v) => v && (Array.isArray(v) ? v.length : true));
+  const resetTo = defaultFilters || {};
+  const clear = () => { setFilters(resetTo); setSearchInput(''); };
+
+  // hasFilters: differs from the default state
+  const hasFilters = (() => {
+    const df = resetTo;
+    const keys = new Set([...Object.keys(filters), ...Object.keys(df)]);
+    for (const k of keys) {
+      const fv = filters[k];
+      const dv = df[k];
+      if (Array.isArray(fv) && Array.isArray(dv)) {
+        if (fv.length !== dv.length || !fv.every((v) => dv.includes(v))) return true;
+      } else if (fv !== dv) return true;
+    }
+    return false;
+  })();
+
+  // Is Prospect currently excluded?
+  const prospectExcluded = filters.stage?.length > 0 && !filters.stage.includes('Prospect');
 
   return (
     <div style={{
@@ -569,9 +625,24 @@ function FiltersBar({ filters, setFilters, schemaProps, showingCount }) {
         )}
       </div>
 
-      <div style={{ color: C.textMuted, fontSize: 11, marginTop: 8 }}>
-        Showing <span style={{ color: C.textPri, fontWeight: 600 }}>{(showingCount || 0).toLocaleString()}</span> accounts
-        {hasFilters && <span style={{ color: C.amber }}> (filtered)</span>}
+      <div style={{ color: C.textMuted, fontSize: 11, marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span>
+          Showing <span style={{ color: C.textPri, fontWeight: 600 }}>{(showingCount || 0).toLocaleString()}</span> accounts
+          {hasFilters && <span style={{ color: C.amber }}> (filtered)</span>}
+        </span>
+        {prospectExcluded && (
+          <span style={{ color: C.textMuted, fontSize: 11 }}>
+            ·{' '}
+            <span style={{ color: C.amber }}>Prospects hidden by default</span>
+            {' '}—{' '}
+            <button
+              onClick={() => setFilters((f) => ({ ...f, stage: PIPELINE_STAGES }))}
+              style={{ background: 'none', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 11, padding: 0 }}
+            >
+              click to include
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -821,6 +892,7 @@ function PaginationBtn({ disabled, onClick, children }) {
 function PipelineSection({ schema, pipelineData, isLoading, error, filters, setFilters, page, setPage }) {
   const [pipelineCols, togglePipelineCol, resetPipelineCols] =
     useColumnState('wt_pipeline_cols_v2', PIPELINE_DEFAULT_COLS);
+  const [tableExpanded, setTableExpanded] = useState(false);
 
   const schemaProps = schema?.pipeline?.properties || {};
   const propOrder   = schema?.pipeline?.propOrder  || [...PIPELINE_DEFAULT_COLS];
@@ -838,6 +910,7 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
         filters={filters} setFilters={setFilters}
         schemaProps={schemaProps}
         showingCount={meta?.total}
+        defaultFilters={DEFAULT_PIPELINE_FILTERS}
       />
 
       {/* Error */}
@@ -858,14 +931,34 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
       {/* Active Deals */}
       {records && <ActiveDealsCallout records={records} />}
 
-      {/* Table */}
+      {/* Collapsible Account Table */}
       {pipelineData && (
-        <AccountTable
-          records={records} meta={meta} page={page} setPage={setPage}
-          visibleCols={pipelineCols} allCols={propOrder}
-          onToggleCol={togglePipelineCol} onResetCols={resetPipelineCols}
-          schemaProps={schemaProps}
-        />
+        <div style={{ marginBottom: 14 }}>
+          <button
+            onClick={() => setTableExpanded((e) => !e)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              background: C.surface, border: `1px solid ${C.border}`, borderRadius: tableExpanded ? '10px 10px 0 0' : 10,
+              padding: '10px 16px', cursor: 'pointer', color: C.textSec, fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <span style={{ color: C.textMuted, fontSize: 11, transform: tableExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▶</span>
+            Account List ({(meta?.total ?? 0).toLocaleString()} accounts)
+            <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
+              {tableExpanded ? '— click to collapse' : '— click to expand'}
+            </span>
+          </button>
+          {tableExpanded && (
+            <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden' }}>
+              <AccountTable
+                records={records} meta={meta} page={page} setPage={setPage}
+                visibleCols={pipelineCols} allCols={propOrder}
+                onToggleCol={togglePipelineCol} onResetCols={resetPipelineCols}
+                schemaProps={schemaProps}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {meta && (
@@ -1060,6 +1153,168 @@ function ActivitySection() {
   );
 }
 
+// ─── Market Account List (collapsible, used in Market Overview) ───────────────
+function MarketAccountList({ globals }) {
+  const [expanded, setExpanded] = useState(false);
+  const [page, setPage] = useState(1);
+  const [localFilters, setLocalFilters] = useState({});
+
+  const buildUrl = () => {
+    const p = new URLSearchParams({ page, pageSize: 50 });
+    if (localFilters.ehr?.length)      p.set('ehr',      localFilters.ehr.join(','));
+    if (localFilters.specialty?.length) p.set('specialty', localFilters.specialty.join(','));
+    if (localFilters.source?.length)   p.set('source',   localFilters.source.join(','));
+    if (localFilters.stage?.length)    p.set('stage',    localFilters.stage.join(','));
+    return `/api/pipeline?${p}`;
+  };
+
+  const { data, isLoading } = useSWR(
+    expanded ? buildUrl() : null,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 10000 }
+  );
+
+  useEffect(() => { setPage(1); }, [localFilters]);
+
+  const total = data?.meta?.total ?? 0;
+  const records = data?.records || [];
+  const meta = data?.meta;
+
+  const statsForOptions = globals?.stats;
+  const ehrOptions  = statsForOptions ? Object.keys(statsForOptions.byEhr || {}).sort() : [];
+  const srcOptions  = statsForOptions ? Object.keys(statsForOptions.bySource || {}).sort() : [];
+  const empBuckets  = ['1-25','26-100','101-500','500+'];
+
+  const mktCols = ['Account Name','EHR','Stage','Specialty','Source Category','Employees #','Annual Revenue ($)','Providers #'];
+
+  const thStyle = {
+    padding: '7px 12px', textAlign: 'left',
+    color: C.textMuted, fontSize: 10, fontWeight: 600,
+    borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap',
+    textTransform: 'uppercase', letterSpacing: '0.4px', background: C.surface,
+  };
+
+  const filterPill = (label, active, onClick) => (
+    <button
+      key={label}
+      onClick={onClick}
+      style={{
+        background: active ? C.teal + '22' : C.surface,
+        color: active ? C.teal : C.textMuted,
+        border: `1px solid ${active ? C.teal + '66' : C.border}`,
+        borderRadius: 20, padding: '3px 10px', cursor: 'pointer', fontSize: 11,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: expanded ? '10px 10px 0 0' : 10,
+          padding: '10px 16px', cursor: 'pointer', color: C.textSec, fontSize: 13, fontWeight: 600,
+        }}
+      >
+        <span style={{ color: C.textMuted, fontSize: 11, transform: expanded ? 'rotate(90deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▶</span>
+        All ICP Accounts {expanded && total > 0 ? `(${total.toLocaleString()} accounts)` : ''}
+        <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
+          {expanded ? '— click to collapse' : '— click to expand'}
+        </span>
+      </button>
+
+      {expanded && (
+        <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden', background: C.card }}>
+          {/* Mini filters */}
+          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            <span style={{ color: C.textMuted, fontSize: 11 }}>Filter:</span>
+            {/* EHR */}
+            {ehrOptions.slice(0, 8).map((ehr) => filterPill(
+              ehr,
+              localFilters.ehr?.includes(ehr),
+              () => setLocalFilters((f) => ({
+                ...f,
+                ehr: f.ehr?.includes(ehr) ? f.ehr.filter((v) => v !== ehr) : [...(f.ehr || []), ehr],
+              }))
+            ))}
+            <span style={{ color: C.border, fontSize: 11 }}>|</span>
+            {/* Employee buckets */}
+            {empBuckets.map((b) => filterPill(
+              b + ' emp',
+              localFilters.employeeBucket?.includes(b),
+              () => setLocalFilters((f) => ({
+                ...f,
+                employeeBucket: f.employeeBucket?.includes(b)
+                  ? f.employeeBucket.filter((v) => v !== b)
+                  : [...(f.employeeBucket || []), b],
+              }))
+            ))}
+            {(Object.values(localFilters).some((v) => Array.isArray(v) && v.length)) && (
+              <button
+                onClick={() => setLocalFilters({})}
+                style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 6, color: C.textMuted, fontSize: 11, cursor: 'pointer', padding: '3px 8px' }}
+              >
+                ✕ Clear
+              </button>
+            )}
+          </div>
+
+          {isLoading && (
+            <div style={{ textAlign: 'center', padding: '30px 0', color: C.textMuted, fontSize: 13 }}>⟳ Loading…</div>
+          )}
+
+          {!isLoading && records.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+                <thead>
+                  <tr>{mktCols.map((col) => <th key={col} style={thStyle}>{col}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {records.map((r, i) => (
+                    <tr key={r.id || i}
+                      style={{ transition: 'background 0.1s', cursor: 'default' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = C.cardHover}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                      {mktCols.map((col) => (
+                        <td key={col} style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle', fontSize: 12, color: C.textSec }}>
+                          {col === 'Account Name'
+                            ? <span style={{ color: C.textPri, fontWeight: 500 }}>{r.fields?.[col] || '—'}</span>
+                            : col === 'Stage'
+                              ? <SelectBadge value={r.fields?.[col]} color={C.blue} small />
+                              : col === 'Annual Revenue ($)' || col === 'ACV ($)'
+                                ? (r.fields?.[col] ? fmt(r.fields[col], 'currency') : '—')
+                                : (r.fields?.[col] != null ? String(r.fields[col]) : '—')
+                          }
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!isLoading && records.length === 0 && (
+            <div style={{ color: C.textMuted, textAlign: 'center', padding: '30px 0', fontSize: 13 }}>No records match the current filters.</div>
+          )}
+
+          {meta?.totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 0', borderTop: `1px solid ${C.border}` }}>
+              <PaginationBtn disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</PaginationBtn>
+              <span style={{ color: C.textSec, fontSize: 12 }}>Page {meta.page} of {meta.totalPages} · {total.toLocaleString()} total</span>
+              <PaginationBtn disabled={page >= meta.totalPages} onClick={() => setPage((p) => p + 1)}>Next →</PaginationBtn>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Section 5: Market Overview ───────────────────────────────────────────────
 function HBarChart({ data, color, maxItems = 15 }) {
   const items = data.slice(0, maxItems);
@@ -1210,6 +1465,9 @@ function MarketOverviewSection({ globals }) {
         </div>
         <CrosstabMatrix rowDim={rowDim} colDim={colDim} />
       </div>
+
+      {/* Collapsible full account list */}
+      <MarketAccountList globals={globals} />
     </Section>
   );
 }
@@ -1329,7 +1587,7 @@ function ContactsTab({ schema }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const [activeTab, setActiveTab] = useState('pipeline');
-  const [filters, setFilters]     = useState({});
+  const [filters, setFilters]     = useState(DEFAULT_PIPELINE_FILTERS);
   const [page, setPage]           = useState(1);
   const [tick, setTick]           = useState(0);
   const [lastRefreshed, setLastRefreshed] = useState(null);

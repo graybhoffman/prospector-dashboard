@@ -28,24 +28,46 @@ function cors(res) {
 
 // ─── Goal computation (always from full dataset) ──────────────────────────────
 function computeGoals(allRecords) {
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  let discoveryPlusThisMonth = 0;
-  let closedWonThisMonth = 0;
+  let discoveryPlus = 0;
+  let closedWon = 0;
+  let deployedRevenue = 0;
+
+  const discoveryDateFields = [
+    'Date → Discovery','Date → SQL','Date → Negotiations',
+    'Date → Closed-Won','Date → Pilot Deployment','Date → Full Deployment',
+  ];
 
   for (const { fields } of allRecords) {
-    const discDate = fields['Date → Discovery'];
-    if (discDate && String(discDate).startsWith(yearMonth)) discoveryPlusThisMonth++;
+    // Discovery+: any stage date field is filled = ever reached Discovery or beyond
+    const hasReachedDiscovery = discoveryDateFields.some((f) => {
+      const v = fields[f];
+      return v && String(v).trim();
+    });
+    if (hasReachedDiscovery) discoveryPlus++;
 
-    const cwDate = fields['Date → Closed-Won'];
-    if (cwDate && String(cwDate).startsWith(yearMonth)) closedWonThisMonth++;
+    // Closed-Won: Stage is Closed-Won, Pilot Deployment, or Full Deployment
+    const stage = fields['Stage'];
+    if (stage === 'Closed-Won' || stage === 'Pilot Deployment' || stage === 'Full Deployment') {
+      closedWon++;
+    }
+
+    // Deployed Revenue: sum ACV for Pilot/Full Deployment; default $150K if blank
+    if (stage === 'Pilot Deployment' || stage === 'Full Deployment') {
+      const acv = fields['ACV ($)'] || fields['ACV'] || 0;
+      deployedRevenue += (acv && acv > 0) ? acv : 150_000;
+    }
   }
 
+  // Floor at known confirmed minimum ($575K Nathan Littauer + $75K Medvanta)
+  deployedRevenue = Math.max(650_000, deployedRevenue);
+
   return {
-    discoveryPlusThisMonth,
-    closedWonThisMonth,
+    discoveryPlus,
+    closedWon,
+    deployedRevenue,
     goal1Target: 35,
     goal2Target: 7,
+    goal3Target: 300_000,
   };
 }
 
