@@ -1,0 +1,35 @@
+/* styles/globals.css — Watchtower base styles */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #0f0f14;
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Slim custom scrollbars */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #2d2d3d #0f0f14;
+}
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0f0f14; }
+::-webkit-scrollbar-thumb { background: #2d2d3d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3d3d4d; }
+
+/* Remove default button styles */
+button { font-family: inherit; }
+
+/* Remove default table styles */
+table { border-collapse: collapse; }
+
+/* Nice focus ring */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
