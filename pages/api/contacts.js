@@ -78,9 +78,10 @@ export default async function handler(req, res) {
   let records = cache.records;
 
   // ─── Filtering ─────────────────────────────────────────────────────────────
-  const { source, inSfdc, inPipeline, search } = req.query;
+  const { source, connDegree, inSfdc, inPipeline, search } = req.query;
 
   if (source)                records = records.filter((r) => r.fields['Source'] === source);
+  if (connDegree)            records = records.filter((r) => r.fields['Connection Degree'] === connDegree);
   if (inSfdc      === 'true') records = records.filter((r) => r.fields['In SFDC']);
   if (inPipeline  === 'true') records = records.filter((r) => r.fields['In Pipeline']);
   if (search) {
