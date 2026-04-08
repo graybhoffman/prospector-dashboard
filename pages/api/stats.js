@@ -46,13 +46,13 @@ function computeGoals(allRecords) {
   }
 
   // Floor at known confirmed minimum ($575K Nathan Littauer + $75K Medvanta)
-  deployedRevenue = Math.max(650_000, deployedRevenue);
+  // deployedRevenue starts at 0 — no floor (Gray: Apr 8)
 
   return {
     discoveryPlus,
     closedWon,
     deployedRevenue,
-    goal1Target: 35,
+    goal1Target: 50,
     goal2Target: 7,
     goal3Target: 300_000,
   };
@@ -144,7 +144,7 @@ export default async function handler(req, res) {
     stale: true,
     recordCount: 0,
     fetchedAt: null,
-    goals: { discoveryPlus: null, closedWon: null, deployedRevenue: null, goal1Target: 35, goal2Target: 7, goal3Target: 300_000 },
+    goals: { discoveryPlus: null, closedWon: null, deployedRevenue: null, goal1Target: 50, goal2Target: 7, goal3Target: 300_000 },
     stats: { total: null, notRcmCount: null, confirmedIcpCount: null, roeCount: null },
   });
 }
