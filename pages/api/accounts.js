@@ -84,6 +84,7 @@ export default async function handler(req, res) {
     search, name, domain, billing_state, industry,
     agents_icp, agents_stage, agents_owner, ehr,
     exclude_from_reporting, has_roe, has_stage,
+    source_category,
     sort: sortCol, dir: sortDir,
     page = '1', limit, pageSize = '50',
     includeExcluded,
@@ -171,6 +172,10 @@ export default async function handler(req, res) {
   // Has stage
   if (has_stage === 'true') {
     conditions.push("(agents_stage IS NOT NULL AND agents_stage != '')");
+  }
+  // Source category filter
+  if (source_category) {
+    conditions.push(`source_category ILIKE ${addParam('%' + source_category + '%')}`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

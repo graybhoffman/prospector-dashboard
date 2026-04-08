@@ -577,8 +577,8 @@ function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summ
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>ICP criteria:</p>
               <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, lineHeight: 1.8 }}>
                 <li>Healthcare practice (not a vendor/tech company)</li>
-                <li>Target EHR: eCW, Athena, ModMed, AdvancedMD, or MEDITECH</li>
-                <li>Size: $10M+ revenue OR 25+ providers OR 100+ employees OR 10+ locations</li>
+                <li>Target EHR: eCW, Athena, ModMed, AdvancedMD, MEDITECH, or Epic</li>
+                <li>Size: $10M+ revenue OR 25+ providers OR 50+ employees OR 10+ locations</li>
               </ul>
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>Deployed ARR:</p>
               <p style={{ margin: 0, lineHeight: 1.6 }}>
@@ -4034,6 +4034,64 @@ function AccountsDataTab() {
         ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none', fontSize: 14 }}>↗</a>
         : <span style={{ color: C.textMuted }}>—</span>,
       getValue: () => '',
+    },
+    {
+      key: 'ehr_system', label: 'EHR', width: 130,
+      render: (row) => {
+        const ehr = row.ehr_system;
+        if (!ehr) return <span style={{ color: C.textMuted }}>—</span>;
+        const EHR_COLORS = {
+          'Athenahealth': '#1e4d7b', 'Athena': '#1e4d7b',
+          'eClinicalWorks': '#1a3d2e', 'eClincalWorks': '#1a3d2e',
+          'EPIC': '#3b2800', 'Epic': '#3b2800',
+          'MEDITECH': '#2d1b5e',
+          'Modernizing Medicine': '#3b2000',
+          'AdvancedMD': '#1e3050',
+        };
+        const bg = EHR_COLORS[ehr] || '#2a2d3e';
+        return <span style={{ background: bg, color: '#e2e8f0', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{ehr}</span>;
+      },
+      getValue: (row) => row.ehr_system,
+    },
+    {
+      key: 'specialty', label: 'Specialty', width: 160,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 11 }}>{row.specialty || '—'}</span>,
+      getValue: (row) => row.specialty,
+    },
+    {
+      key: 'dhc_num_physicians', label: 'Providers', width: 80,
+      render: (row) => {
+        const n = row.dhc_num_physicians;
+        if (!n) return <span style={{ color: C.textMuted }}>—</span>;
+        const color = n >= 25 ? C.green : n >= 10 ? '#f59e0b' : C.textMuted;
+        return <span style={{ color, fontWeight: n >= 25 ? 700 : 400, fontSize: 12 }}>{n}</span>;
+      },
+      getValue: (row) => row.dhc_num_physicians,
+    },
+    {
+      key: 'num_locations', label: 'Locs', width: 60,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.num_locations || row.dhc_num_locations || '—'}</span>,
+      getValue: (row) => row.num_locations || row.dhc_num_locations,
+    },
+    {
+      key: 'source_category', label: 'Source', width: 150,
+      render: (row) => {
+        const s = row.source_category;
+        if (!s) return <span style={{ color: C.textMuted }}>—</span>;
+        const SC_COLORS = {
+          'Direct': '#374151',
+          'MM Customers (x-sell)': '#1e4d3a',
+          'MM New Biz Co-sell': '#1e3a5f',
+          'MM Lead-Gen': '#3b3500',
+          'Meditech': '#2d1b5e',
+          'Enterprise Customers (x-sell)': '#3b0066',
+          'Enterprise New Biz Co-sell': '#003366',
+          'Enterprise Sales Motion': '#1a2a40',
+          'Partnerships': '#3b1a00',
+        };
+        return <span style={{ background: SC_COLORS[s] || '#2a2d3e', color: '#e2e8f0', borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 140, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s}</span>;
+      },
+      getValue: (row) => row.source_category,
     },
   ];
 
