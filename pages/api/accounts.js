@@ -38,7 +38,7 @@ const EDITABLE_FIELDS = new Set([
   'agents_stage', 'agents_owner', 'enrichment_notes', 'agents_icp',
   'exclude_from_reporting', 'roe_flag_notes', 'specialty', 'ehr',
   'num_employees', 'num_providers', 'num_locations', 'annual_revenue',
-  'est_monthly_call_volume', 'next_step',
+  'est_monthly_call_volume', 'next_step', 'db_status',
 ]);
 
 // Whitelist of columns that can be used in ORDER BY (prevent SQL injection)
@@ -54,7 +54,14 @@ export default async function handler(req, res) {
 
   // ── PATCH: inline edit ────────────────────────────────────────────────────
   if (req.method === 'PATCH') {
-    const { accountId, field, value } = req.body || {};
+    const body = req.body || {};
+    // Support both:
+    //   { accountId, field, value }   — inline cell edit (existing)
+    //   { accountId, db_status }      — promote/update db_status shorthand
+    const accountId = body.accountId;
+    const field     = body.db_status !== undefined ? 'db_status' : body.field;
+    const value     = body.db_status !== undefined ? body.db_status : body.value;
+
     if (!accountId || !field) return res.status(400).json({ error: 'accountId and field required' });
     if (!EDITABLE_FIELDS.has(field)) return res.status(400).json({ error: `Field '${field}' is not editable` });
 
@@ -80,6 +87,7 @@ export default async function handler(req, res) {
     sort: sortCol, dir: sortDir,
     page = '1', limit, pageSize = '50',
     includeExcluded,
+    queue,
   } = req.query;
 
   const params = [];
@@ -87,11 +95,22 @@ export default async function handler(req, res) {
 
   const conditions = [];
 
-  // Default: hide excluded accounts (unless explicitly requested)
-  if (exclude_from_reporting === 'true') {
+  // ── db_status filtering ────────────────────────────────────────────────────
+  // ?queue=enrichment → show enrichment_queue accounts only
+  // default          → show main + NULL accounts only
+  // excluded accounts (db_status = 'excluded') are NEVER shown
+  if (queue === 'enrichment') {
+    conditions.push("db_status = 'enrichment_queue'");
+  } else if (exclude_from_reporting === 'true' && includeExcluded === 'true') {
+    // Special case: manage tab showing excluded accounts (existing behaviour)
     conditions.push('exclude_from_reporting = TRUE');
-  } else if (includeExcluded !== 'true') {
-    conditions.push('(exclude_from_reporting = FALSE OR exclude_from_reporting IS NULL)');
+  } else {
+    conditions.push("(db_status = 'main' OR db_status IS NULL)");
+  }
+
+  // Legacy exclude_from_reporting filter (only applies outside db_status mode)
+  if (queue !== 'enrichment' && exclude_from_reporting === 'true' && includeExcluded !== 'true') {
+    conditions.push('exclude_from_reporting = TRUE');
   }
 
   // Global search (OR across name)

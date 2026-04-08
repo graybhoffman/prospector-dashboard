@@ -4037,15 +4037,61 @@ function AccountsDataTab() {
     },
   ];
 
+  const [showQueue, setShowQueue] = React.useState(false);
+
+  const handlePromote = React.useCallback(async (accountId) => {
+    try {
+      await fetch('/api/accounts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId, field: 'db_status', value: 'main' }),
+      });
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const queueColumns = React.useMemo(() => [
+    ...columns,
+    {
+      key: 'promote', label: '', width: 100, filterable: false, sortable: false,
+      render: (row) => (
+        <button
+          onClick={() => handlePromote(row.sfdc_id || row.id)}
+          style={{ padding: '3px 10px', borderRadius: 4, background: '#6d28d9', color: '#e9d5ff', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+        >
+          Promote →
+        </button>
+      ),
+      getValue: () => '',
+    },
+  ], [columns, handlePromote]);
+
   return (
     <div style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, gap: 10 }}>
+        <button
+          onClick={() => setShowQueue(!showQueue)}
+          style={{
+            padding: '5px 12px', borderRadius: 12, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            background: showQueue ? '#6d28d9' : '#2a2d3e',
+            color: showQueue ? '#e9d5ff' : '#a78bfa',
+            border: `1px solid ${showQueue ? '#7c3aed' : '#4c1d95'}`,
+          }}
+        >
+          {showQueue ? '← Main Pipeline' : '🔬 Enrichment Queue (1,246)'}
+        </button>
+      </div>
+      {showQueue && (
+        <div style={{ background: '#1e1040', border: '1px solid #6d28d9', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#c4b5fd' }}>
+          <strong>Enrichment Queue</strong> — accounts with matching EHR but unverified size data. Review and promote to main pipeline when size is confirmed (50+ employees, $10M+ revenue, 25+ providers, or 10+ locations).
+        </div>
+      )}
       <DataGrid
-        columns={columns}
-        fetchUrl="/api/accounts"
+        columns={showQueue ? queueColumns : columns}
+        fetchUrl={showQueue ? '/api/accounts?queue=enrichment' : '/api/accounts'}
         defaultSort={{ key: 'name', dir: 'asc' }}
-        savedViewsKey="wt_accounts_v2"
+        savedViewsKey={showQueue ? 'wt_accounts_queue' : 'wt_accounts_v2'}
         dataKey="accounts"
-        quickFilters={[
+        quickFilters={showQueue ? [] : [
           { label: 'ICP Only',    params: { agents_icp: 'true' } },
           { label: 'Has Stage',   params: { has_stage: 'true' } },
           { label: 'ROE Flagged', params: { has_roe: 'true' } },

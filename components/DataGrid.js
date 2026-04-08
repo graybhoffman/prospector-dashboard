@@ -80,6 +80,8 @@ const SKELETON_WIDTHS = [60, 80, 45, 70, 55, 85, 50, 65, 75, 40];
  * @param {string} props.dataKey    Key in API response that holds the rows array
  * @param {string} props.totalKey   Key in API response that holds total count (default 'total')
  * @param {string} props.emptyState  Custom empty state message
+ * @param {boolean} props.selectable  Enable row checkboxes + selection tracking
+ * @param {Function} props.bulkActions  Render prop: ({selectedIds, selectedRows, clearSelection}) => JSX
  */
 export default function DataGrid({
   columns,
@@ -90,6 +92,8 @@ export default function DataGrid({
   dataKey,
   totalKey = 'total',
   emptyState,
+  selectable = false,
+  bulkActions = null,
 }) {
   const [sort, setSort]                         = useState(defaultSort || { key: null, dir: 'asc' });
   const [colFilters, setColFilters]             = useState({});   // display state (immediate)
@@ -102,6 +106,7 @@ export default function DataGrid({
   const [savedViews, setSavedViews]             = useState([]);
   const [showColPicker, setShowColPicker]       = useState(false);
   const [showViews, setShowViews]               = useState(false);
+  const [selectedIds, setSelectedIds]           = useState(new Set());
 
   const debTimers = useRef({});
   const colPickerRef = useRef(null);
@@ -300,6 +305,29 @@ export default function DataGrid({
     setPage(1);
   }
 
+  // ── Row selection ─────────────────────────────────────────────────────────
+  function toggleRow(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selectedIds.size === rows.length && rows.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(rows.map((r) => r.id || r.sfdc_id)));
+    }
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  const selectedRows = rows.filter((r) => selectedIds.has(r.id || r.sfdc_id));
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div>
@@ -440,6 +468,13 @@ export default function DataGrid({
         }
       </div>
 
+      {/* ── Bulk actions bar ── */}
+      {selectable && bulkActions && selectedIds.size > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {bulkActions({ selectedIds, selectedRows, clearSelection })}
+        </div>
+      )}
+
       {/* ── Table ── */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
@@ -447,6 +482,16 @@ export default function DataGrid({
             <thead>
               {/* Sort headers */}
               <tr>
+                {selectable && (
+                  <th style={{ padding: '9px 8px', width: 36, background: C.card, borderBottom: `1px solid ${C.border}` }}>
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && selectedIds.size === rows.length}
+                      onChange={toggleAll}
+                      style={{ accentColor: '#7c3aed', cursor: 'pointer' }}
+                    />
+                  </th>
+                )}
                 {visibleColumns.map((col) => {
                   const isSorted = sort.key === col.key;
                   const sortable = col.sortable !== false;
@@ -480,6 +525,9 @@ export default function DataGrid({
               </tr>
               {/* Column filter inputs */}
               <tr>
+                {selectable && (
+                  <th style={{ padding: '3px 8px', background: C.surface, borderBottom: `1px solid ${C.border}` }} />
+                )}
                 {visibleColumns.map((col) => (
                   <th key={col.key} style={{ padding: '3px 8px', background: C.surface, borderBottom: `1px solid ${C.border}` }}>
                     {col.filterable !== false && (
@@ -502,6 +550,7 @@ export default function DataGrid({
               {/* Loading skeleton */}
               {isLoading && !data && Array.from({ length: 12 }).map((_, i) => (
                 <tr key={`skel-${i}`}>
+                  {selectable && <td style={{ padding: '8px 8px', borderBottom: `1px solid ${C.border}1a` }} />}
                   {visibleColumns.map((col, j) => (
                     <td key={col.key} style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}1a` }}>
                       <div style={{
@@ -517,20 +566,33 @@ export default function DataGrid({
               {/* Empty state */}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleColumns.length} style={{ textAlign: 'center', padding: '48px 24px', color: C.textMuted, fontSize: 13 }}>
+                  <td colSpan={visibleColumns.length + (selectable ? 1 : 0)} style={{ textAlign: 'center', padding: '48px 24px', color: C.textMuted, fontSize: 13 }}>
                     {emptyState || 'No records match the current filters.'}
                   </td>
                 </tr>
               )}
 
               {/* Data rows */}
-              {!isLoading && rows.map((row, i) => (
+              {!isLoading && rows.map((row, i) => {
+                const rowId = row.id || row.sfdc_id;
+                const isSelected = selectedIds.has(rowId);
+                return (
                 <tr
-                  key={row.id || row.sfdc_id || i}
-                  style={{ transition: 'background 0.1s' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = C.cardHover}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  key={rowId || i}
+                  style={{ transition: 'background 0.1s', background: isSelected ? '#7c3aed11' : undefined }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = C.cardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? '#7c3aed11' : 'transparent'; }}
                 >
+                  {selectable && (
+                    <td style={{ padding: '7px 8px', borderBottom: `1px solid ${C.border}1a`, verticalAlign: 'middle' }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleRow(rowId)}
+                        style={{ accentColor: '#7c3aed', cursor: 'pointer' }}
+                      />
+                    </td>
+                  )}
                   {visibleColumns.map((col) => (
                     <td
                       key={col.key}
@@ -551,7 +613,8 @@ export default function DataGrid({
                     </td>
                   ))}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
