@@ -33,7 +33,7 @@ export default function SignIn() {
           Sign in with Google
         </button>
         <p style={{ color: '#555', fontSize: 12, marginTop: 20 }}>
-          @commure.com accounts only
+          @commure.com and @getathelas.com accounts only
         </p>
       </div>
     </div>
