@@ -2001,6 +2001,7 @@ function DataSection() {
   const [accStage,  setAccStage]    = useState('');
   const [accIcp,    setAccIcp]      = useState(false);
   const [accPage,   setAccPage]     = useState(1);
+  const [accShowExcluded, setAccShowExcluded] = useState(false);
 
   // ─ Contacts state ─
   const [conSearch, setConSearch]   = useState('');
@@ -2022,6 +2023,7 @@ function DataSection() {
     if (accEhr)    p.set('ehr', accEhr);
     if (accStage)  p.set('stage', accStage);
     if (accIcp)    p.set('icp', 'true');
+    if (accShowExcluded) p.set('includeExcluded', 'true');
     return `/api/accounts?${p}`;
   }
   function buildConUrl() {
@@ -2167,6 +2169,9 @@ function DataSection() {
           <button style={S.toggleBtn(accIcp)} onClick={() => { setAccIcp(!accIcp); setAccPage(1); }}>
             {accIcp ? '✅ ICP Only' : 'ICP Only'}
           </button>
+          <button style={S.toggleBtn(accShowExcluded)} onClick={() => { setAccShowExcluded(!accShowExcluded); setAccPage(1); }}>
+            {accShowExcluded ? '👁 Showing Excluded' : 'Show Excluded'}
+          </button>
           {accData?.total != null && (
             <span style={{ color: '#64748b', fontSize: 12, marginLeft: 8 }}>
               {accData.total.toLocaleString()} accounts
@@ -2195,8 +2200,11 @@ function DataSection() {
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
                       <td style={{ ...S.td(i), maxWidth: 220 }}>
                         {a.sfdcAccountLink
-                          ? <a href={a.sfdcAccountLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500 }}>{a.accountName}</a>
-                          : <span style={{ color: '#cbd5e1', fontWeight: 500 }}>{a.accountName}</span>}
+                          ? <a href={a.sfdcAccountLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500, ...(a.excludeFromReporting ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{a.accountName}</a>
+                          : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(a.excludeFromReporting ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{a.accountName}</span>}
+                        {a.excludeFromReporting && (
+                          <span style={{background:'#374151', color:'#9ca3af', fontSize:10, padding:'1px 5px', borderRadius:3, marginLeft:6}}>excluded</span>
+                        )}
                       </td>
                       <td style={S.td(i)}>
                         <span style={{

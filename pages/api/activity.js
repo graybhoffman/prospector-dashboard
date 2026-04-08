@@ -41,6 +41,9 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Pipeline data still loading.', retryAfterMs: 5000 });
   }
 
+  // Filter excluded accounts from activity metrics
+  const activeRecords = allRecords.filter(r => !r.fields['Exclude from Reporting']);
+
   const age = Date.now() - pipelineCache.fetchedAt;
   if (age > CACHE_TTL) startPipelineRefresh();
 
@@ -62,7 +65,7 @@ export default async function handler(req, res) {
   const thisMonthCounts = {};
   const lastMonthCounts = {};
 
-  for (const { fields } of allRecords) {
+  for (const { fields } of activeRecords) {
     const accountName = fields['Account Name'] || 'Unknown';
     const ehr         = fields['EHR'] || null;
 

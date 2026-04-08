@@ -126,12 +126,14 @@ export default async function handler(req, res) {
 
   // If cache is warm (even if slightly stale), return real data immediately
   if (pipelineCache.records) {
-    const goals = computeGoals(pipelineCache.records);
-    const stats = computeStats(pipelineCache.records);
+    // Filter out records marked as "Exclude from Reporting"
+    const activeRecords = pipelineCache.records.filter(r => !r.fields['Exclude from Reporting']);
+    const goals = computeGoals(activeRecords);
+    const stats = computeStats(activeRecords);
     return res.status(200).json({
       loading: false,
       stale: isStale,
-      recordCount: pipelineCache.records.length,
+      recordCount: activeRecords.length,
       fetchedAt: new Date(pipelineCache.fetchedAt).toISOString(),
       goals,
       stats,

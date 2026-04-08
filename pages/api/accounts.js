@@ -136,6 +136,13 @@ export default async function handler(req, res) {
     accounts = accounts.filter(a => a.isICP);
   }
 
+  // ── Exclude from Reporting ─────────────────────────────────────────────────
+  // By default, hide accounts marked as excluded. Pass ?includeExcluded=true to see them.
+  const includeExcluded = req.query.includeExcluded === 'true';
+  if (!includeExcluded) {
+    accounts = accounts.filter(a => !a.excludeFromReporting);
+  }
+
   // ── Pagination ─────────────────────────────────────────────────────────────
   const page     = Math.max(1, parseInt(req.query.page     || '1',  10));
   const pageSize = Math.min(200, parseInt(req.query.pageSize || '50', 10));

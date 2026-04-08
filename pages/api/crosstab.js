@@ -56,11 +56,14 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Pipeline data still loading.' });
   }
 
+  // Filter excluded accounts from crosstab
+  const activeRecords = allRecords.filter(r => !r.fields['Exclude from Reporting']);
+
   const matrix = {};
   const rowSet = new Set();
   const colSet = new Set();
 
-  for (const { fields } of allRecords) {
+  for (const { fields } of activeRecords) {
     let rowVals = getDimensionValue(fields, row);
     let colVals = getDimensionValue(fields, col);
     if (!Array.isArray(rowVals)) rowVals = [rowVals];

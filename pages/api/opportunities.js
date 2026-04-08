@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 
 const JSON_PATH = path.join(process.cwd(), 'data', 'pipeline_opps.json');
+const ACCOUNTS_PATH = path.join(process.cwd(), 'data', 'pipeline_accounts.json');
 
 const STAGE_MAP = {
   // Prospect
@@ -100,12 +101,44 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
+// Build a set of excluded account identifiers (names + IDs) from pipeline_accounts.json
+let _excludedAccountCache = null;
+function getExcludedAccounts() {
+  if (_excludedAccountCache) return _excludedAccountCache;
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACCOUNTS_PATH, 'utf8'));
+    const excluded = new Set();
+    for (const a of raw) {
+      if (a.excludeFromReporting) {
+        if (a.accountName) excluded.add(a.accountName.toLowerCase());
+        if (a.sfdcAccountId) excluded.add(a.sfdcAccountId);
+        if (a.notionPageId)  excluded.add(a.notionPageId);
+      }
+    }
+    _excludedAccountCache = excluded;
+    return excluded;
+  } catch {
+    return new Set();
+  }
+}
+
 export default function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   let opps = loadOpps();
+
+  // ── Filter excluded accounts ───────────────────────────────────────────────
+  const includeExcluded = req.query.includeExcluded === 'true';
+  if (!includeExcluded) {
+    const excludedAccounts = getExcludedAccounts();
+    opps = opps.filter(o => {
+      const name = (o.accountName || '').toLowerCase();
+      const id   = o.accountId || '';
+      return !excludedAccounts.has(name) && !excludedAccounts.has(id);
+    });
+  }
 
   const { search, stage, ehr, owner } = req.query;
 

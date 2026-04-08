@@ -222,12 +222,15 @@ export default async function handler(req, res) {
   const age = Date.now() - pipelineCache.fetchedAt;
   if (age > CACHE_TTL) startPipelineRefresh();
 
-  // ─── Globals (always from full dataset) ────────────────────────────────────
-  const goals       = computeGoals(allRecords);
-  const globalStats = computeGlobalStats(allRecords);
+  // ─── Filter excluded accounts from all reporting ────────────────────────────
+  const activeRecords = allRecords.filter(r => !r.fields['Exclude from Reporting']);
+
+  // ─── Globals (always from full active dataset) ──────────────────────────────
+  const goals       = computeGoals(activeRecords);
+  const globalStats = computeGlobalStats(activeRecords);
 
   // ─── Filtering ─────────────────────────────────────────────────────────────
-  let records = allRecords;
+  let records = activeRecords;
   const { ehr, stage, specialty, source, nonRcm, roe, search, revenueBucket, providerBucket, employeeBucket } = req.query;
 
   if (ehr) {
