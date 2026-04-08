@@ -3760,7 +3760,6 @@ export default function Home() {
               border: `1px solid ${C.border}`, borderRadius: 10, padding: 4,
             }}>
               {tabBtn('pipeline', '📊 Dashboard')}
-              {tabBtn('icpdetail', '📋 ICP Accounts Detail')}
               {tabBtn('accounts', '🏢 Accounts')}
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('opportunities', '💼 Opportunities')}
@@ -3795,8 +3794,8 @@ export default function Home() {
           <>
             {/* Dashboard section selector */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 18, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
-              {(['activity', 'pipeline'] ).map((sec) => {
-                const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity' };
+              {(['activity', 'pipeline', 'icpaccounts']).map((sec) => {
+                const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity', icpaccounts: '📋 ICP Accounts' };
                 const active = dashSection === sec;
                 return (
                   <button key={sec} onClick={() => setDashSection(sec)} style={{
@@ -3830,19 +3829,17 @@ export default function Home() {
                 <ActivitySection />
               </>
             )}
-          </>
-        )}
-
-        {/* ── ICP Accounts Detail Tab ── */}
-        {activeTab === 'icpdetail' && (
-          <>
-            <MarketSummarySection
-              globals={globals}
-              statsLoading={statsLoading}
-              title="📊 Total ICP Accounts"
-              hiddenLabels={['Non-RCM ICP', 'Confirmed ICP Tier']}
-            />
-            <MarketOverviewSection globals={globals} title="🌍 ICP Account List - Detailed View" />
+            {dashSection === 'icpaccounts' && (
+              <>
+                <MarketSummarySection
+                  globals={globals}
+                  statsLoading={statsLoading}
+                  title="📊 Total ICP Accounts"
+                  hiddenLabels={['Non-RCM ICP', 'Confirmed ICP Tier']}
+                />
+                <MarketOverviewSection globals={globals} title="🌍 ICP Account List - Detailed View" />
+              </>
+            )}
           </>
         )}
 
