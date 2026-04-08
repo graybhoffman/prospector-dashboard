@@ -12,6 +12,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, LabelList,
 } from 'recharts';
+import DataGrid, { STAGE_COLORS, STAGE_TEXT_COLORS } from '../components/DataGrid';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
@@ -2809,12 +2810,741 @@ function ManageTab() {
   );
 }
 
+// ─── Collapsible Dashboard Section ───────────────────────────────────────────
+function DashSection({ title, defaultOpen = true, accent = '#6366f1', children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: 16, border: `1px solid ${C.border}`, borderLeftColor: accent, borderLeftWidth: 3, borderRadius: '0 10px 10px 0', background: C.card, overflow: 'hidden' }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: '100%', background: 'transparent', border: 'none',
+        padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        cursor: 'pointer', borderBottom: open ? `1px solid ${C.border}` : 'none',
+      }}>
+        <span style={{ color: C.textPri, fontWeight: 700, fontSize: 14 }}>{title}</span>
+        <span style={{ color: C.textMuted, fontSize: 12, transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▼</span>
+      </button>
+      {open && <div style={{ padding: '14px 16px' }}>{children}</div>}
+    </div>
+  );
+}
+
+// ─── Activity Metric Card ─────────────────────────────────────────────────────
+function ActivityMetricCard({ emoji, label, value, target, loading, note }) {
+  const pct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : null;
+  const status = pct === null ? null : pct >= 100 ? '✅' : pct >= 70 ? '⚠️' : '🔴';
+  const statusColor = pct === null ? C.textMuted : pct >= 100 ? C.green : pct >= 70 ? C.amber : C.red;
+
+  return (
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
+      padding: '14px 16px', flex: '1 1 140px', minWidth: 130,
+    }}>
+      <div style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+        {emoji} {label}
+      </div>
+      {loading
+        ? <div style={{ background: C.card, borderRadius: 4, height: 24, width: '60%', opacity: 0.5 }} />
+        : (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ color: C.textPri, fontSize: 22, fontWeight: 700, letterSpacing: '-0.5px' }}>
+              {value.toLocaleString()}
+            </span>
+            {target != null && (
+              <span style={{ color: C.textMuted, fontSize: 12 }}>
+                / {target}
+              </span>
+            )}
+            {status && <span style={{ fontSize: 14 }}>{status}</span>}
+          </div>
+        )
+      }
+      {target != null && pct !== null && !loading && (
+        <div style={{ marginTop: 6, background: C.card, borderRadius: 99, height: 4, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: statusColor, borderRadius: 99, transition: 'width 0.5s' }} />
+        </div>
+      )}
+      {note && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 4 }}>{note}</div>}
+    </div>
+  );
+}
+
+// ─── Activity Empty Table ─────────────────────────────────────────────────────
+function ActivityEmptyTable({ columns, label }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 8 }}>
+      <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, color: C.textSec, fontSize: 12, fontWeight: 600 }}>
+        {label}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr>
+              {columns.map(col => (
+                <th key={col} style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.4px', whiteSpace: 'nowrap', background: C.card }}>{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={columns.length} style={{ textAlign: 'center', padding: '32px 16px', color: C.textMuted, fontSize: 12 }}>
+                📭 No data yet — will populate once SFDC Task sync is active
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Week date range label ────────────────────────────────────────────────────
+function getWeekRange() {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((day + 6) % 7));
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `Week of ${fmt(monday)}–${fmt(friday)}`;
+}
+
+// ─── Activity Trend Charts ────────────────────────────────────────────────────
+function ActivityTrendCharts() {
+  const [callsWindow, setCallsWindow] = useState('daily');
+  const [coverageWindow, setCoverageWindow] = useState('daily');
+  const [setsWindow, setSetsWindow] = useState('daily');
+
+  // Build placeholder trend data
+  const buildPlaceholder = (n, base, variance) =>
+    Array.from({ length: n }, (_, i) => ({
+      label: `P${i + 1}`,
+      calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0,
+    }));
+
+  const dailyData  = buildPlaceholder(14, 0, 0).map((d, i) => {
+    const date = new Date(); date.setDate(date.getDate() - (13 - i));
+    return { ...d, label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
+  });
+  const weeklyData = buildPlaceholder(4, 0, 0).map((d, i) => {
+    const date = new Date(); date.setDate(date.getDate() - (3 - i) * 7);
+    const mon = new Date(date); mon.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+    return { ...d, label: `Wk ${mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` };
+  });
+  const monthlyData = buildPlaceholder(4, 0, 0).map((d, i) => {
+    const date = new Date(); date.setMonth(date.getMonth() - (3 - i));
+    return { ...d, label: date.toLocaleDateString('en-US', { month: 'short' }) };
+  });
+
+  const getWindowData = (w) => w === 'daily' ? dailyData : w === 'weekly' ? weeklyData : monthlyData;
+  const callsTarget = callsWindow === 'daily' ? 40 : callsWindow === 'weekly' ? 200 : 880;
+  const connectsTarget = callsWindow === 'daily' ? 4 : callsWindow === 'weekly' ? 20 : 88;
+  const setsTarget = setsWindow === 'daily' ? 1 : setsWindow === 'weekly' ? 5 : 22;
+
+  const windowBtns = (current, setCurrent) => ['daily', 'weekly', 'monthly'].map(w => (
+    <button key={w} onClick={() => setCurrent(w)} style={{
+      background: current === w ? C.accent + '33' : 'transparent',
+      color: current === w ? C.accent : C.textMuted,
+      border: `1px solid ${current === w ? C.accent + '55' : 'transparent'}`,
+      borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11,
+      fontWeight: current === w ? 600 : 400, textTransform: 'capitalize',
+    }}>{w.charAt(0).toUpperCase() + w.slice(1)}</button>
+  ));
+
+  const CHART_H = 180;
+  const chartStyle = {
+    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px',
+    flex: '1 1 300px', minWidth: 280,
+  };
+
+  const emptyNote = (
+    <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+      📊 Charts will populate once SFDC Task sync is active
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Chart 1 — Calls & Connects */}
+      <div style={chartStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>📞 Calls &amp; Connects</span>
+          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(callsWindow, setCallsWindow)}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+          <span style={{ color: C.blue }}>■ Outbound Calls</span>
+          <span style={{ color: C.amber }}>— Live Connects</span>
+          <span style={{ color: C.textMuted, borderTop: '1px dashed', paddingTop: 1 }}>- - - Target ({callsTarget}/pd)</span>
+        </div>
+        <ResponsiveContainer width="100%" height={CHART_H}>
+          <BarChart data={getWindowData(callsWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <Tooltip
+              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: C.textSec }}
+              itemStyle={{ color: C.textPri }}
+            />
+            <Bar dataKey="calls" fill={C.blue} radius={[3, 3, 0, 0]} name="Calls" />
+            <Bar dataKey="connects" fill={C.amber} radius={[3, 3, 0, 0]} name="Connects" />
+          </BarChart>
+        </ResponsiveContainer>
+        {emptyNote}
+      </div>
+
+      {/* Chart 2 — Outreach Coverage */}
+      <div style={chartStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>🎯 Outreach Coverage</span>
+          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(coverageWindow, setCoverageWindow)}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+          <span style={{ color: C.teal }}>■ Contacts Reached</span>
+          <span style={{ color: C.purple }}>■ Accounts Contacted</span>
+        </div>
+        <ResponsiveContainer width="100%" height={CHART_H}>
+          <BarChart data={getWindowData(coverageWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: C.textSec }} itemStyle={{ color: C.textPri }} />
+            <Bar dataKey="contacts" fill={C.teal} radius={[3, 3, 0, 0]} name="Contacts" />
+            <Bar dataKey="accounts" fill={C.purple} radius={[3, 3, 0, 0]} name="Accounts" />
+          </BarChart>
+        </ResponsiveContainer>
+        {emptyNote}
+      </div>
+
+      {/* Chart 3 — Sets */}
+      <div style={chartStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>📅 Discovery Sets</span>
+          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(setsWindow, setSetsWindow)}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+          <span style={{ color: C.green }}>■ Sets (Disco Scheduled)</span>
+          <span style={{ color: C.textMuted }}>- - - Target ({setsTarget}/pd)</span>
+        </div>
+        <ResponsiveContainer width="100%" height={CHART_H}>
+          <BarChart data={getWindowData(setsWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: C.textSec }} itemStyle={{ color: C.textPri }} />
+            <Bar dataKey="sets" fill={C.green} radius={[3, 3, 0, 0]} name="Sets" />
+          </BarChart>
+        </ResponsiveContainer>
+        {emptyNote}
+      </div>
+    </div>
+  );
+}
+
+// ─── Activity Dashboard ───────────────────────────────────────────────────────
+function ActivityDashboard() {
+  const { data: todayData,   isLoading: todayLoading  } = useSWR('/api/activity-stats?window=today',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: weekData,    isLoading: weekLoading   } = useSWR('/api/activity-stats?window=week',   fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+
+  const today = todayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const week  = weekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const isLive = todayData?.isLive ?? false;
+
+  const liveNote = !isLive ? 'Live once SFDC sync active' : null;
+
+  return (
+    <div>
+      {/* Live status banner */}
+      {!isLive && (
+        <div style={{ background: C.amber + '11', border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '8px 14px', marginBottom: 14, color: C.amber, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>⏳</span>
+          <span>Activity sync not yet active — stats below are placeholders. Once SFDC Task sync runs, this dashboard will populate automatically.</span>
+        </div>
+      )}
+
+      {/* ── Section 1 — Today's Stats ── */}
+      <DashSection title="📊 Today's Stats" accent={C.blue}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}              target={40} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={today.connects}           target={4}  loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={today.contactsContacted}  target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={today.accountsContacted}  target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={today.sets}               target={1}  loading={todayLoading} note={liveNote} />
+        </div>
+      </DashSection>
+
+      {/* ── Section 2 — Daily Activity Detail ── */}
+      <DashSection title="📋 Daily Activity Detail" accent={C.purple} defaultOpen={false}>
+        <ActivityEmptyTable label="📞 Outbound Calls" columns={['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link']} />
+        <ActivityEmptyTable label="🔗 Live Connects"  columns={['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link']} />
+        <ActivityEmptyTable label="👤 Contacts Contacted" columns={['Contact Name', 'Account', 'Rep', 'Activity Types Today', 'Last Touch']} />
+        <ActivityEmptyTable label="🏢 Accounts Contacted" columns={['Account Name', 'Rep', '# Touches Today', 'Activity Types', 'Stage']} />
+        <ActivityEmptyTable label="📅 Sets (Disco Scheduled)" columns={['Time', 'Account', 'Contact', 'Rep', 'Meeting Date', 'Subject', 'SFDC']} />
+      </DashSection>
+
+      {/* ── Section 3 — This Week's Stats ── */}
+      <DashSection title={`📅 This Week's Stats — ${getWeekRange()}`} accent={C.teal}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}              target={200} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={week.connects}           target={20}  loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={week.contactsContacted}  target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={week.accountsContacted}  target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={week.sets}               target={5}   loading={weekLoading} note={liveNote} />
+        </div>
+        {/* Daily breakdown table */}
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Metric</th>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map(d => (
+                  <th key={d} style={{ padding: '7px 12px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{d}</th>
+                ))}
+                <th style={{ padding: '7px 12px', textAlign: 'center', color: C.teal, fontSize: 10, fontWeight: 700, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { label: '📞 Calls', target: 40, key: 'calls' },
+                { label: '🔗 Connects', target: 4, key: 'connects' },
+                { label: '👤 Contacts', target: null, key: 'contactsContacted' },
+                { label: '🏢 Accounts', target: null, key: 'accountsContacted' },
+                { label: '📅 Sets', target: 1, key: 'sets' },
+              ].map(metric => (
+                <tr key={metric.key}>
+                  <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, color: C.textSec, fontSize: 12 }}>
+                    {metric.label}
+                    {metric.target && <span style={{ color: C.textMuted, fontSize: 10 }}> (tgt: {metric.target}/day)</span>}
+                  </td>
+                  {['mon', 'tue', 'wed', 'thu', 'fri'].map(day => (
+                    <td key={day} style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
+                      {weekData?.daily?.[day]?.[metric.key] ?? '—'}
+                    </td>
+                  ))}
+                  <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.teal, fontWeight: 700, fontSize: 12 }}>
+                    {week[metric.key] || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </DashSection>
+
+      {/* ── Section 4 — Activity Trends ── */}
+      <DashSection title="📈 Activity Trends" accent={C.green} defaultOpen={false}>
+        <ActivityTrendCharts />
+      </DashSection>
+    </div>
+  );
+}
+
+// ─── New Data Tabs (DataGrid-powered) ─────────────────────────────────────────
+
+function AccountsDataTab() {
+  const fmtCurrency = (n) => {
+    if (n == null || n === '') return '—';
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+    return `$${n}`;
+  };
+
+  const columns = [
+    {
+      key: 'name', label: 'Account Name', width: 220,
+      render: (row) => (
+        row.sfdc_link
+          ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.accent, fontWeight: 500, textDecoration: 'none', fontSize: 12 }}>{row.name || '—'}</a>
+          : <span style={{ color: C.textPri, fontWeight: 500, fontSize: 12 }}>{row.name || '—'}</span>
+      ),
+      getValue: (row) => row.name,
+    },
+    {
+      key: 'agents_stage', label: 'Stage', width: 140,
+      render: (row) => {
+        const s = row.agents_stage;
+        if (!s) return <span style={{ color: C.textMuted }}>—</span>;
+        const bg = STAGE_COLORS[s] || '#374151';
+        const fg = STAGE_TEXT_COLORS[s] || '#9ca3af';
+        return (
+          <span style={{ background: bg, color: fg, border: `1px solid ${fg}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {s}
+          </span>
+        );
+      },
+      getValue: (row) => row.agents_stage,
+    },
+    {
+      key: 'agents_icp', label: 'ICP', width: 60, filterable: false,
+      render: (row) => row.agents_icp ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.agents_icp ? 'Yes' : 'No',
+    },
+    {
+      key: 'domain', label: 'Domain', width: 160,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.domain || '—'}</span>,
+    },
+    {
+      key: 'billing_state', label: 'State', width: 70,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.billing_state || '—'}</span>,
+    },
+    {
+      key: 'industry', label: 'Industry', width: 150,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.industry || '—'}</span>,
+    },
+    {
+      key: 'num_providers', label: '# Providers', width: 90, filterable: false,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.num_providers ?? '—'}</span>,
+      getValue: (row) => row.num_providers,
+    },
+    {
+      key: 'agents_owner', label: 'Owner', width: 130,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.agents_owner || '—'}</span>,
+    },
+    {
+      key: 'potential_roe_issue', label: 'ROE', width: 90, filterable: false, sortable: false,
+      render: (row) => {
+        const issues = row.potential_roe_issue;
+        const hasIssue = Array.isArray(issues) ? issues.length > 0 : (issues && issues !== '[]' && issues !== 'null');
+        return hasIssue
+          ? <span style={{ background: C.amber + '22', color: C.amber, border: `1px solid ${C.amber}44`, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>🟡 ROE</span>
+          : <span style={{ color: C.textMuted }}>—</span>;
+      },
+      getValue: (row) => row.potential_roe_issue ? 'Yes' : '',
+    },
+    {
+      key: 'exclude_from_reporting', label: 'Excluded', width: 80, filterable: false,
+      render: (row) => row.exclude_from_reporting
+        ? <span style={{ background: '#37415122', color: '#9ca3af', border: '1px solid #37415166', borderRadius: 4, padding: '1px 6px', fontSize: 10 }}>excl</span>
+        : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.exclude_from_reporting ? 'Yes' : '',
+    },
+    {
+      key: 'sfdc_id', label: 'SFDC', width: 50, filterable: false, sortable: false,
+      render: (row) => row.sfdc_link
+        ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none', fontSize: 14 }}>↗</a>
+        : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: () => '',
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <DataGrid
+        columns={columns}
+        fetchUrl="/api/accounts"
+        defaultSort={{ key: 'name', dir: 'asc' }}
+        savedViewsKey="wt_accounts_v2"
+        dataKey="accounts"
+        quickFilters={[
+          { label: 'ICP Only',    params: { agents_icp: 'true' } },
+          { label: 'Has Stage',   params: { has_stage: 'true' } },
+          { label: 'ROE Flagged', params: { has_roe: 'true' } },
+          { label: 'Excluded',    params: { exclude_from_reporting: 'true', includeExcluded: 'true' } },
+        ]}
+      />
+    </div>
+  );
+}
+
+function ContactsDataTab() {
+  const columns = [
+    {
+      key: 'full_name', label: 'Name', width: 180,
+      render: (row) => {
+        const name = row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim();
+        return <span style={{ color: C.textPri, fontWeight: 500, fontSize: 12 }}>{name || '—'}</span>;
+      },
+      getValue: (row) => row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+    },
+    {
+      key: 'title', label: 'Title', width: 180,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.title || '—'}</span>,
+    },
+    {
+      key: 'account_name', label: 'Account', width: 200,
+      render: (row) => <span style={{ color: C.purple, fontSize: 12 }}>{row.account_name || '—'}</span>,
+    },
+    {
+      key: 'email', label: 'Email', width: 200,
+      render: (row) => row.email
+        ? <a href={`mailto:${row.email}`} style={{ color: C.accent, fontSize: 12, textDecoration: 'none' }}>{row.email}</a>
+        : <span style={{ color: C.textMuted }}>—</span>,
+    },
+    {
+      key: 'phone', label: 'Phone', width: 140,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.phone || '—'}</span>,
+    },
+    {
+      key: 'target_persona', label: 'Target Persona', width: 100, filterable: false,
+      render: (row) => row.target_persona ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.target_persona ? 'Yes' : '',
+    },
+    {
+      key: 'agents_icp', label: 'ICP', width: 60, filterable: false,
+      render: (row) => row.agents_icp ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.agents_icp ? 'Yes' : '',
+    },
+    {
+      key: 'sfdc_id', label: 'SFDC', width: 50, filterable: false, sortable: false,
+      render: (row) => row.sfdc_link
+        ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none', fontSize: 14 }}>↗</a>
+        : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: () => '',
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <DataGrid
+        columns={columns}
+        fetchUrl="/api/contacts"
+        defaultSort={{ key: 'full_name', dir: 'asc' }}
+        savedViewsKey="wt_contacts_v2"
+        dataKey="contacts"
+        quickFilters={[
+          { label: 'Target Persona', params: { target_persona: 'true' } },
+          { label: 'ICP Only',       params: { agents_icp: 'true' } },
+          { label: 'Has Email',      params: { has_email: 'true' } },
+          { label: 'Has Phone',      params: { has_phone: 'true' } },
+        ]}
+      />
+    </div>
+  );
+}
+
+function OpportunitiesDataTab() {
+  const fmtAcv = (n) => {
+    if (n == null || n === '') return '—';
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${n.toLocaleString()}`;
+    return `$${n}`;
+  };
+
+  const columns = [
+    {
+      key: 'account_name', label: 'Account', width: 220,
+      render: (row) => (
+        row.sfdc_link
+          ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.accent, fontWeight: 500, textDecoration: 'none', fontSize: 12 }}>{row.account_name || row.name || '—'}</a>
+          : <span style={{ color: C.textPri, fontWeight: 500, fontSize: 12 }}>{row.account_name || row.name || '—'}</span>
+      ),
+      getValue: (row) => row.account_name,
+    },
+    {
+      key: 'stage_normalized', label: 'Stage', width: 160,
+      render: (row) => {
+        const s = row.stage_normalized || row.stage;
+        if (!s) return <span style={{ color: C.textMuted }}>—</span>;
+        const bg = STAGE_COLORS[s] || '#374151';
+        const fg = STAGE_TEXT_COLORS[s] || '#9ca3af';
+        return (
+          <span style={{ background: bg, color: fg, border: `1px solid ${fg}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {s}
+          </span>
+        );
+      },
+      getValue: (row) => row.stage_normalized || row.stage,
+    },
+    {
+      key: 'acv', label: 'ACV', width: 100, filterable: false,
+      render: (row) => <span style={{ color: C.green, fontWeight: 600, fontSize: 12 }}>{fmtAcv(row.acv)}</span>,
+      getValue: (row) => row.acv,
+    },
+    {
+      key: 'owner', label: 'Owner', width: 140,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.owner || '—'}</span>,
+    },
+    {
+      key: 'close_date', label: 'Close Date', width: 110,
+      render: (row) => {
+        if (!row.close_date) return <span style={{ color: C.textMuted }}>—</span>;
+        try {
+          const d = new Date(row.close_date);
+          return <span style={{ color: C.textSec, fontSize: 12 }}>{d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>;
+        } catch { return <span style={{ color: C.textSec, fontSize: 12 }}>{row.close_date}</span>; }
+      },
+      getValue: (row) => row.close_date,
+    },
+    {
+      key: 'source_category', label: 'Source', width: 140,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.source_category || '—'}</span>,
+    },
+    {
+      key: 'agents_icp', label: 'ICP', width: 60, filterable: false,
+      render: (row) => row.agents_icp ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.agents_icp ? 'Yes' : '',
+    },
+    {
+      key: 'discovery_scheduled', label: 'Disco Sched', width: 90, filterable: false,
+      render: (row) => row.discovery_scheduled ? <span style={{ color: C.green }}>✅</span> : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: (row) => row.discovery_scheduled ? 'Yes' : '',
+    },
+    {
+      key: 'sfdc_id', label: 'SFDC', width: 50, filterable: false, sortable: false,
+      render: (row) => row.sfdc_link
+        ? <a href={row.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none', fontSize: 14 }}>↗</a>
+        : <span style={{ color: C.textMuted }}>—</span>,
+      getValue: () => '',
+    },
+  ];
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <DataGrid
+        columns={columns}
+        fetchUrl="/api/opportunities"
+        defaultSort={{ key: 'account_name', dir: 'asc' }}
+        savedViewsKey="wt_opps_v2"
+        dataKey="opportunities"
+        quickFilters={[
+          { label: 'Active Only',  params: { active_only: 'true' } },
+          { label: 'Closed-Won',   params: { closed_won: 'true' } },
+          { label: 'Closed-Lost',  params: { closed_lost: 'true' } },
+          { label: 'ICP Only',     params: { agents_icp: 'true' } },
+          { label: 'Missing ACV',  params: { missing_acv: 'true' } },
+        ]}
+      />
+    </div>
+  );
+}
+
+function ActivitiesDataTab() {
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
+        <div style={{ color: C.textPri, fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Activity Log — Coming Soon</div>
+        <p style={{ color: C.textSec, fontSize: 13, margin: '0 0 16px 0', maxWidth: 500, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+          This tab will show a full log of calls, emails, meetings, and tasks once the SFDC Task sync is active.
+          Records will include date, type, subject, account, contact, rep, outcome, and source.
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <span style={{ background: C.green + '22', color: C.green, border: `1px solid ${C.green}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
+            ✅ Webhook endpoint ready: /api/webhook/sfdc
+          </span>
+          <span style={{ background: C.green + '22', color: C.green, border: `1px solid ${C.green}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
+            ✅ Webhook endpoint ready: /api/webhook/outreach
+          </span>
+          <span style={{ background: C.amber + '22', color: C.amber, border: `1px solid ${C.amber}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
+            ⏳ SFDC Task sync: pending
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SyncLogDataTab() {
+  const { data: syncData, isLoading } = useSWR('/api/sync-log', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 60_000,
+  });
+
+  // Calculate next scheduled run times
+  function getNextRun(hour, minute) {
+    const now = new Date();
+    const next = new Date();
+    next.setUTCHours(hour, minute, 0, 0);
+    if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+    const diff = next - now;
+    const h = Math.floor(diff / 3_600_000);
+    const m = Math.floor((diff % 3_600_000) / 60_000);
+    return { time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`, in: h > 0 ? `in ${h}h ${m}m` : `in ${m}m` };
+  }
+
+  const schedule = [
+    { name: 'SFDC Account sync',      ...getNextRun(2, 0)  },
+    { name: 'SFDC Contact sync',      ...getNextRun(2, 15) },
+    { name: 'SFDC Opportunity sync',  ...getNextRun(2, 30) },
+    { name: 'SFDC Activity (Tasks) sync', ...getNextRun(3, 0) },
+  ];
+
+  const thS = { padding: '8px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.4px', background: C.card, whiteSpace: 'nowrap' };
+  const tdS = { padding: '7px 12px', borderBottom: `1px solid ${C.border}1a`, fontSize: 12, color: C.textSec, whiteSpace: 'nowrap' };
+
+  function StatusBadge({ errors }) {
+    if (errors == null) return null;
+    if (errors === 0) return <span style={{ background: C.green + '22', color: C.green, border: `1px solid ${C.green}44`, borderRadius: 4, padding: '1px 7px', fontSize: 11 }}>✅ ok</span>;
+    if (errors < 5)   return <span style={{ background: C.amber + '22', color: C.amber, border: `1px solid ${C.amber}44`, borderRadius: 4, padding: '1px 7px', fontSize: 11 }}>⚠️ partial</span>;
+    return <span style={{ background: C.red + '22', color: C.red, border: `1px solid ${C.red}44`, borderRadius: 4, padding: '1px 7px', fontSize: 11 }}>❌ errors</span>;
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      {/* Section 1 — Last 48h syncs */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+          <span style={{ color: C.textPri, fontWeight: 700, fontSize: 14 }}>🕐 Recent Syncs (Last 48h)</span>
+        </div>
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: C.textMuted }}>⟳ Loading…</div>
+        )}
+        {!isLoading && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['Time', 'Table', 'Type', 'Records Synced', 'Created', 'Updated', 'Errors', 'Status', 'Notes'].map(h => (
+                    <th key={h} style={thS}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(!syncData?.recentEntries || syncData.recentEntries.length === 0) && (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '32px 0', color: C.textMuted, fontSize: 12 }}>
+                      No sync history yet — runs will appear here after the first scheduled sync.
+                    </td>
+                  </tr>
+                )}
+                {(syncData?.recentEntries || []).map((r, i) => (
+                  <tr key={r.id || i} onMouseEnter={(e) => e.currentTarget.style.background = C.cardHover} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'} style={{ transition: 'background 0.1s' }}>
+                    <td style={tdS}>{r.completed_at ? new Date(r.completed_at).toLocaleString() : '—'}</td>
+                    <td style={{ ...tdS, color: C.purple, fontWeight: 600 }}>{r.table_name}</td>
+                    <td style={tdS}><span style={{ background: C.blue + '22', color: C.blue, borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>{r.sync_type || '—'}</span></td>
+                    <td style={{ ...tdS, textAlign: 'right' }}>{r.records_synced?.toLocaleString() ?? '—'}</td>
+                    <td style={{ ...tdS, textAlign: 'right', color: C.green }}>{r.records_created?.toLocaleString() ?? '—'}</td>
+                    <td style={{ ...tdS, textAlign: 'right', color: C.amber }}>{r.records_updated?.toLocaleString() ?? '—'}</td>
+                    <td style={{ ...tdS, textAlign: 'right' }}>{r.errors > 0 ? <span style={{ color: C.red, fontWeight: 600 }}>{r.errors}</span> : '0'}</td>
+                    <td style={tdS}><StatusBadge errors={r.errors} /></td>
+                    <td style={{ ...tdS, maxWidth: 200, whiteSpace: 'normal', color: C.textMuted }}>{r.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Section 2 — Upcoming scheduled syncs */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px 20px' }}>
+        <div style={{ color: C.textPri, fontWeight: 700, fontSize: 14, marginBottom: 12 }}>📅 Upcoming Scheduled Syncs</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {schedule.map((s, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px' }}>
+              <span style={{ color: C.blue, fontSize: 18 }}>🔄</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: C.textPri, fontSize: 13, fontWeight: 500 }}>{s.name}</div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>Daily at {s.time}</div>
+              </div>
+              <span style={{ color: C.teal, fontSize: 12, fontWeight: 600, background: C.teal + '11', border: `1px solid ${C.teal}33`, borderRadius: 6, padding: '3px 10px' }}>
+                {s.in}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const { data: session } = useSession();
   const userRole = session?.user?.role || 'viewer';
 
   const [activeTab, setActiveTab] = useState('pipeline');
+  const [dashSection, setDashSection] = useState('pipeline'); // 'pipeline' | 'activity'
   const [filters, setFilters]     = useState(DEFAULT_PIPELINE_FILTERS);
   const [page, setPage]           = useState(1);
   const [tick, setTick]           = useState(0);
@@ -2915,9 +3645,12 @@ export default function Home() {
               display: 'flex', gap: 4, background: C.card,
               border: `1px solid ${C.border}`, borderRadius: 10, padding: 4,
             }}>
-              {tabBtn('pipeline', '📊 Pipeline')}
+              {tabBtn('pipeline', '📊 Dashboard')}
+              {tabBtn('accounts', '🏢 Accounts')}
               {tabBtn('contacts', '👥 Contacts')}
-              {tabBtn('data', '🗂 Data')}
+              {tabBtn('opportunities', '💼 Opportunities')}
+              {tabBtn('activities', '📞 Activities')}
+              {tabBtn('synclog', '🔄 Sync Log')}
               {tabBtn('manage', '⚙️ Manage')}
             </div>
 
@@ -2942,31 +3675,65 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ── Pipeline Tab ── */}
+        {/* ── Dashboard Tab ── */}
         {activeTab === 'pipeline' && (
           <>
-            <GoalsSection globals={globals} currentMonth={currentMonth} statsLoading={statsLoading} />
-            <MarketSummarySection globals={globals} statsLoading={statsLoading} />
-            <PipelineSection
-              schema={schema}
-              pipelineData={pipelineData}
-              isLoading={pipelineLoading}
-              error={pipelineError}
-              filters={filters}
-              setFilters={setFilters}
-              page={page}
-              setPage={setPage}
-            />
-            <ActivitySection />
-            <MarketOverviewSection globals={globals} />
+            {/* Dashboard section selector */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: 18, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
+              {(['activity', 'pipeline'] ).map((sec) => {
+                const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity' };
+                const active = dashSection === sec;
+                return (
+                  <button key={sec} onClick={() => setDashSection(sec)} style={{
+                    background:   active ? C.accent + '22' : 'transparent',
+                    color:        active ? C.accent : C.textSec,
+                    border:       `1px solid ${active ? C.accent + '66' : 'transparent'}`,
+                    borderRadius: 7, padding: '5px 20px', cursor: 'pointer',
+                    fontSize: 13, fontWeight: active ? 600 : 400, transition: 'all 0.15s',
+                  }}>
+                    {labels[sec]}
+                  </button>
+                );
+              })}
+            </div>
+
+            {dashSection === 'activity' && <ActivityDashboard />}
+
+            {dashSection === 'pipeline' && (
+              <>
+                <GoalsSection globals={globals} currentMonth={currentMonth} statsLoading={statsLoading} />
+                <MarketSummarySection globals={globals} statsLoading={statsLoading} />
+                <PipelineSection
+                  schema={schema}
+                  pipelineData={pipelineData}
+                  isLoading={pipelineLoading}
+                  error={pipelineError}
+                  filters={filters}
+                  setFilters={setFilters}
+                  page={page}
+                  setPage={setPage}
+                />
+                <ActivitySection />
+                <MarketOverviewSection globals={globals} />
+              </>
+            )}
           </>
         )}
 
-        {/* ── Contacts Tab ── */}
-        {activeTab === 'contacts' && <ContactsTab schema={schema} />}
+        {/* ── Accounts Tab ── */}
+        {activeTab === 'accounts' && <AccountsDataTab />}
 
-        {/* ── Data Tab ── */}
-        {activeTab === 'data' && <DataSection />}
+        {/* ── Contacts Tab ── */}
+        {activeTab === 'contacts' && <ContactsDataTab />}
+
+        {/* ── Opportunities Tab ── */}
+        {activeTab === 'opportunities' && <OpportunitiesDataTab />}
+
+        {/* ── Activities Tab ── */}
+        {activeTab === 'activities' && <ActivitiesDataTab />}
+
+        {/* ── Sync Log Tab ── */}
+        {activeTab === 'synclog' && <SyncLogDataTab />}
 
         {/* ── Manage Tab ── */}
         {activeTab === 'manage' && <ManageTab />}
