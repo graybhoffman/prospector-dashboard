@@ -1,12 +1,20 @@
 /**
- * /api/stats — GET
- * Returns globals (goals + stats) as fast as possible.
- * If cache is warm → returns real data immediately.
- * If cache is cold → starts background refresh, returns placeholder with loading:true
- * so the frontend can show skeletons and re-poll until data arrives.
+ * /api/stats — GET (Postgres-backed)
+ *
+ * Migrated from Notion pipelineCache → Neon Postgres.
+ * Same response shape preserved for frontend compatibility.
+ *
+ * Returns goals + stats for the full main accounts dataset.
+ * No loading state / cache TTL — every request hits Postgres directly.
+ * (Neon serverless queries are fast; no warm-up needed.)
+ *
+ * Response:
+ *   { loading, stale, recordCount, fetchedAt, goals, stats }
+ *
+ * stats.total / recordCount = total main accounts = 3,419 (Postgres source of truth)
  */
 
-import { pipelineCache, startPipelineRefresh, CACHE_TTL } from '../../lib/pipelineCache';
+import { query } from '../../lib/db';
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,139 +22,139 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-function computeGoals(allRecords) {
-  let discoveryPlus = 0;
-  let closedWon = 0;
-  let deployedRevenue = 0;
-
-  const discoveryDateFields = [
-    'Date → Discovery','Date → SQL','Date → Negotiations',
-    'Date → Closed-Won','Date → Pilot Deployment','Date → Full Deployment',
-  ];
-
-  for (const { fields } of allRecords) {
-    // Discovery+: any stage date field is filled = ever reached Discovery or beyond
-    const hasReachedDiscovery = discoveryDateFields.some((f) => {
-      const v = fields[f];
-      return v && String(v).trim();
-    });
-    if (hasReachedDiscovery) discoveryPlus++;
-
-    // Closed-Won: Stage is Closed-Won, Pilot Deployment, or Full Deployment
-    const stage = fields['Stage'];
-    if (stage === 'Closed-Won' || stage === 'Pilot Deployment' || stage === 'Full Deployment') {
-      closedWon++;
-    }
-
-    // Deployed Revenue: sum ACV for Pilot/Full Deployment; default $150K if blank
-    if (stage === 'Pilot Deployment' || stage === 'Full Deployment') {
-      const acv = fields['ACV ($)'] || fields['ACV'] || 0;
-      deployedRevenue += (acv && acv > 0) ? acv : 150_000;
-    }
-  }
-
-  // Floor at known confirmed minimum ($575K Nathan Littauer + $75K Medvanta)
-  // deployedRevenue starts at 0 — no floor (Gray: Apr 8)
-
-  return {
-    discoveryPlus,
-    closedWon,
-    deployedRevenue,
-    goal1Target: 50,
-    goal2Target: 7,
-    goal3Target: 300_000,
-  };
-}
-
-function computeStats(allRecords) {
-  const total = allRecords.length;
-  let notRcmCount = 0, confirmedIcpCount = 0, roeCount = 0;
-  const byStage = {}, byEhr = {}, bySpecialty = {}, bySource = {};
-  const employeeBuckets = { '1-25': 0, '26-100': 0, '101-500': 0, '500+': 0 };
-  const byRevenueBucket  = { '<$1M': 0, '$1M-$5M': 0, '$5M-$10M': 0, '$10M-$25M': 0, '$25M+': 0, 'Unknown': 0 };
-  const byProviderBucket = { '1-5': 0, '6-15': 0, '16-30': 0, '31-50': 0, '50+': 0, 'Unknown': 0 };
-
-  for (const { fields } of allRecords) {
-    if (fields['Not in RCM ICP'] === true) notRcmCount++;
-    const rev = fields['Annual Revenue ($)'] || 0;
-    const prov = fields['Providers #'] || 0;
-    const emp = fields['Employees #'] || 0;
-    const locs = fields['# of locations'] || 0;
-    if (rev >= 10_000_000 || prov >= 25 || emp >= 100 || locs >= 10) confirmedIcpCount++;
-    if (fields['Potential ROE Issue']) roeCount++;
-
-    const stage = fields['Stage'] || 'Unknown';
-    byStage[stage] = (byStage[stage] || 0) + 1;
-
-    const ehr = fields['EHR'] || 'Unknown';
-    byEhr[ehr] = (byEhr[ehr] || 0) + 1;
-
-    const spec = fields['Specialty'] || 'Unknown';
-    bySpecialty[spec] = (bySpecialty[spec] || 0) + 1;
-
-    const src = fields['Source Category'] || 'Unknown';
-    bySource[src] = (bySource[src] || 0) + 1;
-
-    const e = emp || 0;
-    if (e <= 25) employeeBuckets['1-25']++;
-    else if (e <= 100) employeeBuckets['26-100']++;
-    else if (e <= 500) employeeBuckets['101-500']++;
-    else if (e > 500) employeeBuckets['500+']++;
-
-    // Revenue bucket
-    if (!rev || rev === 0) byRevenueBucket['Unknown']++;
-    else if (rev < 1_000_000) byRevenueBucket['<$1M']++;
-    else if (rev < 5_000_000) byRevenueBucket['$1M-$5M']++;
-    else if (rev < 10_000_000) byRevenueBucket['$5M-$10M']++;
-    else if (rev < 25_000_000) byRevenueBucket['$10M-$25M']++;
-    else byRevenueBucket['$25M+']++;
-
-    // Provider bucket
-    if (!prov || prov === 0) byProviderBucket['Unknown']++;
-    else if (prov <= 5) byProviderBucket['1-5']++;
-    else if (prov <= 15) byProviderBucket['6-15']++;
-    else if (prov <= 30) byProviderBucket['16-30']++;
-    else if (prov <= 50) byProviderBucket['31-50']++;
-    else byProviderBucket['50+']++;
-  }
-
-  return { total, notRcmCount, confirmedIcpCount, roeCount, byStage, byEhr, bySpecialty, bySource, employeeBuckets, byRevenueBucket, byProviderBucket };
-}
-
 export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const age = Date.now() - pipelineCache.fetchedAt;
-  const isStale = !pipelineCache.records || age > CACHE_TTL;
+  try {
+    const BASE = `WHERE db_status = 'main' AND (exclude_from_reporting IS NOT TRUE)`;
 
-  if (isStale && !pipelineCache.isFetching) {
-    startPipelineRefresh();
-  }
+    const [
+      // Goals
+      discoveryPlusRes,
+      closedWonRes,
+      deployedArrRes,
+      // Stats
+      totalRes,
+      stageRes,
+      ehrRes,
+      specialtyRes,
+      sourceRes,
+      empBucketRes,
+      revBucketRes,
+      provBucketRes,
+      roeRes,
+    ] = await Promise.all([
 
-  // If cache is warm (even if slightly stale), return real data immediately
-  if (pipelineCache.records) {
-    // Filter out records marked as "Exclude from Reporting"
-    const activeRecords = pipelineCache.records.filter(r => !r.fields['Exclude from Reporting']);
-    const goals = computeGoals(activeRecords);
-    const stats = computeStats(activeRecords);
+      // ── Goals ─────────────────────────────────────────────────────────────
+      query(`SELECT COUNT(*) FROM accounts
+        WHERE db_status = 'main'
+          AND agents_stage IN ('Discovery','SQL','Disco Scheduled','Negotiations','Pilot Deployment','Full Deployment')
+          AND (exclude_from_reporting IS NOT TRUE)`),
+
+      query(`SELECT COUNT(*) FROM opportunities WHERE stage ILIKE '%won%'`)
+        .catch(() => ({ rows: [{ count: '0' }] })),
+
+      query(`SELECT COALESCE(SUM(acv), 0) AS total FROM opportunities WHERE stage ILIKE '%won%' OR stage ILIKE '%deployment%'`)
+        .catch(() => ({ rows: [{ total: '0' }] })),
+
+      // ── Stats ─────────────────────────────────────────────────────────────
+      query(`SELECT COUNT(*) FROM accounts ${BASE}`),
+
+      query(`SELECT agents_stage   AS val, COUNT(*) FROM accounts ${BASE} GROUP BY 1 ORDER BY COUNT(*) DESC`),
+      query(`SELECT ehr_system     AS val, COUNT(*) FROM accounts ${BASE} GROUP BY 1 ORDER BY COUNT(*) DESC`),
+      query(`SELECT specialty      AS val, COUNT(*) FROM accounts ${BASE} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`),
+      query(`SELECT source_category AS val, COUNT(*) FROM accounts ${BASE} GROUP BY 1 ORDER BY COUNT(*) DESC`),
+
+      query(`SELECT
+          CASE
+            WHEN num_employees >= 500 THEN '500+'
+            WHEN num_employees >= 101 THEN '101-500'
+            WHEN num_employees >= 26  THEN '26-100'
+            WHEN num_employees >  0   THEN '1-25'
+            ELSE 'Unknown'
+          END AS bucket, COUNT(*)
+        FROM accounts ${BASE} GROUP BY 1`),
+
+      query(`SELECT
+          CASE
+            WHEN annual_revenue >= 25000000 THEN '$25M+'
+            WHEN annual_revenue >= 10000000 THEN '$10M-$25M'
+            WHEN annual_revenue >=  5000000 THEN '$5M-$10M'
+            WHEN annual_revenue >=  1000000 THEN '$1M-$5M'
+            WHEN annual_revenue >         0 THEN '<$1M'
+            ELSE 'Unknown'
+          END AS bucket, COUNT(*)
+        FROM accounts ${BASE} GROUP BY 1`),
+
+      query(`SELECT
+          CASE
+            WHEN COALESCE(dhc_num_physicians, num_providers, 0) > 50  THEN '50+'
+            WHEN COALESCE(dhc_num_physicians, num_providers, 0) >= 31 THEN '31-50'
+            WHEN COALESCE(dhc_num_physicians, num_providers, 0) >= 16 THEN '16-30'
+            WHEN COALESCE(dhc_num_physicians, num_providers, 0) >= 6  THEN '6-15'
+            WHEN COALESCE(dhc_num_physicians, num_providers, 0) >= 1  THEN '1-5'
+            ELSE 'Unknown'
+          END AS bucket, COUNT(*)
+        FROM accounts ${BASE} GROUP BY 1`),
+
+      query(`SELECT COUNT(*) FROM accounts ${BASE}
+        AND potential_roe_issue IS NOT NULL
+        AND potential_roe_issue::text NOT IN ('', 'null', '[]')`),
+    ]);
+
+    // ── Build response ─────────────────────────────────────────────────────
+    const total            = parseInt(totalRes.rows[0].count, 10);
+    const discoveryPlus    = parseInt(discoveryPlusRes.rows[0].count, 10);
+    const closedWon        = parseInt(closedWonRes.rows[0].count, 10);
+    const deployedRevenue  = parseFloat(deployedArrRes.rows[0].total) || 0;
+    const roeCount         = parseInt(roeRes.rows[0].count, 10);
+
+    const toObj  = (rows) => Object.fromEntries(rows.map(r => [r.val    || 'Unknown', parseInt(r.count, 10)]));
+    const toBObj = (rows) => Object.fromEntries(rows.map(r => [r.bucket || 'Unknown', parseInt(r.count, 10)]));
+
+    const goals = {
+      discoveryPlus,
+      closedWon,
+      deployedRevenue,
+      goal1Target:  50,
+      goal2Target:  7,
+      goal3Target:  300_000,
+    };
+
+    const stats = {
+      total,
+      notRcmCount:       0, // not tracked in Postgres
+      confirmedIcpCount: total, // all db_status='main' accounts are ICP
+      roeCount,
+      byStage:           toObj(stageRes.rows),
+      byEhr:             toObj(ehrRes.rows),
+      bySpecialty:       toObj(specialtyRes.rows),
+      bySource:          toObj(sourceRes.rows),
+      employeeBuckets:   toBObj(empBucketRes.rows),
+      byRevenueBucket:   toBObj(revBucketRes.rows),
+      byProviderBucket:  toBObj(provBucketRes.rows),
+    };
+
     return res.status(200).json({
-      loading: false,
-      stale: isStale,
-      recordCount: activeRecords.length,
-      fetchedAt: new Date(pipelineCache.fetchedAt).toISOString(),
+      loading:     false,
+      stale:       false,
+      recordCount: total,
+      fetchedAt:   new Date().toISOString(),
+      source:      'postgres',
       goals,
       stats,
     });
+  } catch (err) {
+    console.error('[stats GET]', err.message, err.stack);
+    return res.status(500).json({
+      loading: false,
+      stale:   true,
+      error:   err.message,
+      recordCount: 0,
+      fetchedAt:   null,
+      goals:  { discoveryPlus: null, closedWon: null, deployedRevenue: null, goal1Target: 50, goal2Target: 7, goal3Target: 300_000 },
+      stats:  { total: null, notRcmCount: null, confirmedIcpCount: null, roeCount: null },
+    });
   }
-
-  // Cache is cold — return placeholder so frontend can show skeleton
-  return res.status(200).json({
-    loading: true,
-    stale: true,
-    recordCount: 0,
-    fetchedAt: null,
-    goals: { discoveryPlus: null, closedWon: null, deployedRevenue: null, goal1Target: 50, goal2Target: 7, goal3Target: 300_000 },
-    stats: { total: null, notRcmCount: null, confirmedIcpCount: null, roeCount: null },
-  });
 }
