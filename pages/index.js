@@ -469,7 +469,7 @@ function MarketSummarySection({ globals, statsLoading }) {
               <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, lineHeight: 1.8 }}>
                 <li>Healthcare practice (not a vendor/tech company)</li>
                 <li>Target EHR: eCW, Athena, ModMed, AdvancedMD, or MEDITECH</li>
-                <li>$1M+ revenue OR 5+ locations OR 25+ employees</li>
+                <li>Size: $10M+ revenue OR 25+ providers OR 100+ employees OR 10+ locations</li>
               </ul>
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>Deployed ARR:</p>
               <p style={{ margin: 0, lineHeight: 1.6 }}>
@@ -1940,6 +1940,412 @@ function ContactsTab({ schema }) {
   );
 }
 
+// ─── DataSection ──────────────────────────────────────────────────────────────
+function fmt$(n) {
+  if (n == null || n === '') return '—';
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n}`;
+}
+
+function InlineEdit({ value, fieldKey, accountId, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState('');
+  const inputRef = useRef(null);
+
+  function startEdit() {
+    setDraft(value ?? '');
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function commit() {
+    setEditing(false);
+    if (String(draft) !== String(value ?? '')) onSave(accountId, fieldKey, draft);
+  }
+
+  if (editing) return (
+    <input
+      ref={inputRef}
+      value={draft}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+      style={{
+        background: '#0f1117', color: '#fff', border: '1px solid #22c55e',
+        borderRadius: 4, padding: '2px 6px', width: '100%', fontSize: 12,
+        outline: 'none',
+      }}
+    />
+  );
+
+  return (
+    <div
+      onClick={startEdit}
+      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, minWidth: 40 }}
+      title="Click to edit"
+    >
+      <span style={{ color: '#cbd5e1' }}>{value || '—'}</span>
+      <span style={{ color: '#475569', fontSize: 10, opacity: 0, transition: 'opacity 0.1s' }} className="pencil">✏</span>
+    </div>
+  );
+}
+
+function DataSection() {
+  const [subTab, setSubTab] = useState('accounts');
+
+  // ─ Accounts state ─
+  const [accSearch, setAccSearch]   = useState('');
+  const [accEhr,    setAccEhr]      = useState('');
+  const [accStage,  setAccStage]    = useState('');
+  const [accIcp,    setAccIcp]      = useState(false);
+  const [accPage,   setAccPage]     = useState(1);
+
+  // ─ Contacts state ─
+  const [conSearch, setConSearch]   = useState('');
+  const [conAccId,  setConAccId]    = useState('');
+  const [conTarget, setConTarget]   = useState(false);
+  const [conPage,   setConPage]     = useState(1);
+
+  // ─ Opps state ─
+  const [oppSearch, setOppSearch]   = useState('');
+  const [oppStage,  setOppStage]    = useState('');
+  const [oppEhr,    setOppEhr]      = useState('');
+  const [oppOwner,  setOppOwner]    = useState('');
+  const [oppPage,   setOppPage]     = useState(1);
+
+  // ─ Build URLs ─
+  function buildAccUrl() {
+    const p = new URLSearchParams({ page: accPage, pageSize: 50 });
+    if (accSearch) p.set('search', accSearch);
+    if (accEhr)    p.set('ehr', accEhr);
+    if (accStage)  p.set('stage', accStage);
+    if (accIcp)    p.set('icp', 'true');
+    return `/api/accounts?${p}`;
+  }
+  function buildConUrl() {
+    const p = new URLSearchParams({ page: conPage, pageSize: 50 });
+    if (conSearch) p.set('search', conSearch);
+    if (conAccId)  p.set('accountId', conAccId);
+    if (conTarget) p.set('targetPersona', 'true');
+    return `/api/sfdc-contacts?${p}`;
+  }
+  function buildOppUrl() {
+    const p = new URLSearchParams({ page: oppPage, pageSize: 50 });
+    if (oppSearch) p.set('search', oppSearch);
+    if (oppStage)  p.set('stage', oppStage);
+    if (oppEhr)    p.set('ehr', oppEhr);
+    if (oppOwner)  p.set('owner', oppOwner);
+    return `/api/opportunities?${p}`;
+  }
+
+  const { data: accData,  isLoading: accLoading  } = useSWR(subTab === 'accounts'     ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false });
+  const { data: conData,  isLoading: conLoading  } = useSWR(subTab === 'contacts'     ? buildConUrl() : null, fetcher, { revalidateOnFocus: false });
+  const { data: oppData,  isLoading: oppLoading  } = useSWR(subTab === 'opportunities'? buildOppUrl() : null, fetcher, { revalidateOnFocus: false });
+
+  const [searchDraft, setSearchDraft] = useState('');
+  const searchRef = useRef(null);
+
+  useEffect(() => {
+    setSearchDraft('');
+    setAccPage(1); setConPage(1); setOppPage(1);
+  }, [subTab]);
+
+  function handleSearch(val) {
+    setSearchDraft(val);
+    clearTimeout(searchRef.current);
+    searchRef.current = setTimeout(() => {
+      if (subTab === 'accounts')      { setAccSearch(val);  setAccPage(1); }
+      if (subTab === 'contacts')      { setConSearch(val);  setConPage(1); }
+      if (subTab === 'opportunities') { setOppSearch(val);  setOppPage(1); }
+    }, 350);
+  }
+
+  async function handleInlineEdit(accountId, field, value) {
+    try {
+      await fetch('/api/accounts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId, field, value }),
+      });
+      // Re-fetch will happen automatically via SWR
+    } catch (e) {
+      console.error('Inline edit failed:', e);
+    }
+  }
+
+  // Styles
+  const S = {
+    container: { background: '#1a1d2e', borderRadius: 12, padding: '18px 20px', marginTop: 20, border: '1px solid #252535' },
+    subTabBar: { display: 'flex', gap: 4, marginBottom: 14 },
+    subTab: (active) => ({
+      background: active ? '#6366f122' : 'transparent',
+      color: active ? '#6366f1' : '#94a3b8',
+      border: `1px solid ${active ? '#6366f166' : 'transparent'}`,
+      borderRadius: 8, padding: '5px 14px', cursor: 'pointer',
+      fontSize: 12, fontWeight: active ? 600 : 400,
+    }),
+    filterRow: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' },
+    searchBox: {
+      background: '#0f1117', border: '1px solid #252535', borderRadius: 8,
+      color: '#fff', padding: '6px 10px', fontSize: 12, width: 220, outline: 'none',
+    },
+    select: {
+      background: '#0f1117', border: '1px solid #252535', borderRadius: 8,
+      color: '#94a3b8', padding: '6px 10px', fontSize: 12, outline: 'none', cursor: 'pointer',
+    },
+    toggleBtn: (active) => ({
+      background: active ? '#22c55e22' : '#0f1117',
+      color: active ? '#22c55e' : '#94a3b8',
+      border: `1px solid ${active ? '#22c55e66' : '#252535'}`,
+      borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer',
+    }),
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
+    th: { padding: '7px 8px', color: '#64748b', borderBottom: '1px solid #252535', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: 500 },
+    td: (i) => ({ padding: '6px 8px', borderBottom: '1px solid #1e2235', background: i % 2 === 0 ? '#1a1d2e' : '#1e2240', whiteSpace: 'nowrap' }),
+    icpBadge: { background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 },
+    pagination: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, color: '#64748b', fontSize: 12 },
+    pageBtn: (disabled) => ({
+      background: disabled ? '#0f1117' : '#252535', color: disabled ? '#475569' : '#cbd5e1',
+      border: '1px solid #252535', borderRadius: 6, padding: '4px 10px', cursor: disabled ? 'default' : 'pointer', fontSize: 12,
+    }),
+    link: { color: '#6366f1', textDecoration: 'none' },
+    muted: { color: '#64748b' },
+    loading: { textAlign: 'center', padding: '40px 0', color: '#64748b', fontSize: 13 },
+  };
+
+  function Pagination({ page, setPage, total, pageSize }) {
+    const totalPages = Math.ceil(total / pageSize);
+    return (
+      <div style={S.pagination}>
+        <button style={S.pageBtn(page <= 1)} onClick={() => page > 1 && setPage(page - 1)} disabled={page <= 1}>← Prev</button>
+        <span>Page {page} of {totalPages} · {total.toLocaleString()} records</span>
+        <button style={S.pageBtn(page >= totalPages)} onClick={() => page < totalPages && setPage(page + 1)} disabled={page >= totalPages}>Next →</button>
+      </div>
+    );
+  }
+
+  // ─ Accounts Table ─
+  function AccountsTable() {
+    const accounts = accData?.accounts || [];
+    const total    = accData?.total || 0;
+    const EHR_OPTIONS = ['eCW','Athena','ModMed','AdvancedMD','MEDITECH','Epic','Cerner','Other'];
+    const STAGE_OPTIONS = ['IQM Set','Active Evaluation','Proposal','Negotiation','Pilot Deployment','Full Deployment','Closed-Won','Closed-Lost','FHA','Dead'];
+
+    return (
+      <>
+        <div style={S.filterRow}>
+          <input placeholder="🔍 Search accounts…" value={searchDraft} onChange={e => handleSearch(e.target.value)} style={S.searchBox} />
+          <select value={accEhr} onChange={e => { setAccEhr(e.target.value); setAccPage(1); }} style={S.select}>
+            <option value="">All EHRs</option>
+            {EHR_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={accStage} onChange={e => { setAccStage(e.target.value); setAccPage(1); }} style={S.select}>
+            <option value="">All Stages</option>
+            {STAGE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <button style={S.toggleBtn(accIcp)} onClick={() => { setAccIcp(!accIcp); setAccPage(1); }}>
+            {accIcp ? '✅ ICP Only' : 'ICP Only'}
+          </button>
+        </div>
+        {accLoading && <div style={S.loading}>⟳ Loading accounts…</div>}
+        {!accLoading && (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    {['Account','Stage','EHR','ICP','Employees','Providers','Locations','Revenue','Est. Call Vol','Specialty','Source','Owner'].map(h =>
+                      <th key={h} style={S.th}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {accounts.length === 0 && (
+                    <tr><td colSpan={12} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No accounts found</td></tr>
+                  )}
+                  {accounts.map((a, i) => (
+                    <tr key={a.accountId || i} style={{ transition: 'background 0.1s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#252540'}
+                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                      <td style={S.td(i)}>
+                        {a.sfdcUrl
+                          ? <a href={a.sfdcUrl} target="_blank" rel="noreferrer" style={S.link}>{a.accountName}</a>
+                          : <span style={{ color: '#cbd5e1' }}>{a.accountName}</span>}
+                      </td>
+                      <td style={S.td(i)}><span style={S.muted}>{a.stage || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{a.ehr || '—'}</span></td>
+                      <td style={S.td(i)}>{a.isICP ? <span style={S.icpBadge}>ICP</span> : <span style={S.muted}>—</span>}</td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.employees} fieldKey="employees" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.providers} fieldKey="providers" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.locations} fieldKey="locations" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.annualRevenue} fieldKey="annualRevenue" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.monthlyCallVolume} fieldKey="monthlyCallVolume" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={a.specialty} fieldKey="specialty" accountId={a.accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}><span style={S.muted}>{a.sourceCategory || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{a.agentsTeamOwner || '—'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {total > 0 && <Pagination page={accPage} setPage={setAccPage} total={total} pageSize={50} />}
+          </>
+        )}
+      </>
+    );
+  }
+
+  // ─ Contacts Table ─
+  function ContactsTable() {
+    const contacts = conData?.contacts || [];
+    const total    = conData?.total    || 0;
+    return (
+      <>
+        <div style={S.filterRow}>
+          <input placeholder="🔍 Search contacts…" value={searchDraft} onChange={e => handleSearch(e.target.value)} style={S.searchBox} />
+          <button style={S.toggleBtn(conTarget)} onClick={() => { setConTarget(!conTarget); setConPage(1); }}>
+            {conTarget ? '✅ Target Persona' : 'Target Persona'}
+          </button>
+        </div>
+        {conLoading && <div style={S.loading}>⟳ Loading contacts…</div>}
+        {!conLoading && (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    {['Name','Title','Email','Phone','Account','Target Persona'].map(h =>
+                      <th key={h} style={S.th}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {contacts.length === 0 && (
+                    <tr><td colSpan={6} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No contacts found</td></tr>
+                  )}
+                  {contacts.map((c, i) => (
+                    <tr key={c.contactId || i}
+                      onMouseEnter={e => e.currentTarget.style.background = '#252540'}
+                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                      <td style={S.td(i)}><span style={{ color: '#cbd5e1', fontWeight: 500 }}>{`${c.firstName} ${c.lastName}`.trim() || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{c.title || '—'}</span></td>
+                      <td style={S.td(i)}>{c.email ? <a href={`mailto:${c.email}`} style={S.link}>{c.email}</a> : <span style={S.muted}>—</span>}</td>
+                      <td style={S.td(i)}><span style={S.muted}>{c.phone || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{c.accountName || '—'}</span></td>
+                      <td style={S.td(i)}>{c.targetPersona ? <span style={S.icpBadge}>✓</span> : <span style={S.muted}>—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {total > 0 && <Pagination page={conPage} setPage={setConPage} total={total} pageSize={50} />}
+          </>
+        )}
+      </>
+    );
+  }
+
+  // ─ Opportunities Table ─
+  function OpportunitiesTable() {
+    const opps  = oppData?.opportunities || [];
+    const total = oppData?.total          || 0;
+    const STAGE_OPTS = ['Early / Mid Pipeline','Late Pipeline','Closed Won','Closed Lost'];
+    const EHR_OPTS   = ['eCW','Athena','ModMed','AdvancedMD','MEDITECH','Epic','Cerner'];
+    const owners = [...new Set((oppData?.opportunities || []).map(o => o.owner).filter(Boolean))].sort();
+
+    return (
+      <>
+        <div style={S.filterRow}>
+          <input placeholder="🔍 Search opportunities…" value={searchDraft} onChange={e => handleSearch(e.target.value)} style={S.searchBox} />
+          <select value={oppStage} onChange={e => { setOppStage(e.target.value); setOppPage(1); }} style={S.select}>
+            <option value="">All Stages</option>
+            {STAGE_OPTS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={oppEhr} onChange={e => { setOppEhr(e.target.value); setOppPage(1); }} style={S.select}>
+            <option value="">All EHRs</option>
+            {EHR_OPTS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={oppOwner} onChange={e => { setOppOwner(e.target.value); setOppPage(1); }} style={S.select}>
+            <option value="">All Owners</option>
+            {owners.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        {oppLoading && <div style={S.loading}>⟳ Loading opportunities…</div>}
+        {!oppLoading && (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    {['Opp Name','Account','Stage','EHR','ACV','Close Date','Owner'].map(h =>
+                      <th key={h} style={S.th}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {opps.length === 0 && (
+                    <tr><td colSpan={7} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No opportunities found</td></tr>
+                  )}
+                  {opps.map((o, i) => (
+                    <tr key={o.opportunityId || i}
+                      onMouseEnter={e => e.currentTarget.style.background = '#252540'}
+                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                      <td style={S.td(i)}>
+                        {o.sfdcUrl
+                          ? <a href={o.sfdcUrl} target="_blank" rel="noreferrer" style={S.link}>{o.oppName}</a>
+                          : <span style={{ color: '#cbd5e1' }}>{o.oppName || '—'}</span>}
+                      </td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{o.accountName || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{o.stageBucket || o.stage || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#60a5fa' }}>{o.ehr || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#22c55e' }}>{o.acv ? fmt$(o.acv) : '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{o.closeDate || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{o.owner || '—'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {total > 0 && <Pagination page={oppPage} setPage={setOppPage} total={total} pageSize={50} />}
+          </>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div style={S.container}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#e2e8f0' }}>🗂 Data Explorer</h2>
+        <span style={{ color: '#64748b', fontSize: 12 }}>Accounts · Contacts · Opportunities</span>
+      </div>
+
+      <div style={S.subTabBar}>
+        {[['accounts','📋 Accounts'],['contacts','👤 Contacts'],['opportunities','💼 Opportunities']].map(([id, label]) => (
+          <button key={id} style={S.subTab(subTab === id)} onClick={() => setSubTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      {subTab === 'accounts'      && <AccountsTable />}
+      {subTab === 'contacts'      && <ContactsTable />}
+      {subTab === 'opportunities' && <OpportunitiesTable />}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const [activeTab, setActiveTab] = useState('pipeline');
@@ -2045,6 +2451,7 @@ export default function Home() {
             }}>
               {tabBtn('pipeline', '📊 Pipeline')}
               {tabBtn('contacts', '👥 Contacts')}
+              {tabBtn('data', '🗂 Data')}
             </div>
           </div>
         </div>
@@ -2071,6 +2478,9 @@ export default function Home() {
 
         {/* ── Contacts Tab ── */}
         {activeTab === 'contacts' && <ContactsTab schema={schema} />}
+
+        {/* ── Data Tab ── */}
+        {activeTab === 'data' && <DataSection />}
 
       </div>
     </div>

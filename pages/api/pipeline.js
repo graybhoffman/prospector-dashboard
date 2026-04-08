@@ -134,7 +134,7 @@ function computeGlobalStats(allRecords) {
     const locations = fields['# of locations'];
     if (
       (rev && rev >= 10_000_000) ||
-      (providers && providers >= 50) ||
+      (providers && providers >= 25) ||
       (employees && employees >= 100) ||
       (locations && locations >= 10)
     ) confirmedIcpCount++;

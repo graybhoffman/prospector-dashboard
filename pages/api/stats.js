@@ -72,7 +72,7 @@ function computeStats(allRecords) {
     const prov = fields['Providers #'] || 0;
     const emp = fields['Employees #'] || 0;
     const locs = fields['# of locations'] || 0;
-    if (rev >= 10_000_000 || prov >= 50 || emp >= 100 || locs >= 10) confirmedIcpCount++;
+    if (rev >= 10_000_000 || prov >= 25 || emp >= 100 || locs >= 10) confirmedIcpCount++;
     if (fields['Potential ROE Issue']) roeCount++;
 
     const stage = fields['Stage'] || 'Unknown';
