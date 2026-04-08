@@ -2130,7 +2130,26 @@ function DataSection() {
     const accounts = accData?.accounts || [];
     const total    = accData?.total || 0;
     const EHR_OPTIONS = ['eCW','Athena','ModMed','AdvancedMD','MEDITECH','Epic','Cerner','Other'];
-    const STAGE_OPTIONS = ['IQM Set','Active Evaluation','Proposal','Negotiation','Pilot Deployment','Full Deployment','Closed-Won','Closed-Lost','FHA','Dead'];
+    const STAGE_OPTIONS = [
+      'Prospect','Outreach','Discovery','SQL','Negotiations',
+      'Pilot Deployment','Full Deployment','Closed-Won',
+    ];
+
+    function RoeBadge({ issues }) {
+      if (!issues || issues.length === 0) return <span style={S.muted}>—</span>;
+      const hasRed = issues.some(i => i.toLowerCase().includes('hard') || i.toLowerCase().includes('block'));
+      return (
+        <span title={issues.join(', ')} style={{
+          background: hasRed ? '#ef444422' : '#f59e0b22',
+          color:      hasRed ? '#ef4444'   : '#f59e0b',
+          border:     `1px solid ${hasRed ? '#ef444444' : '#f59e0b44'}`,
+          borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700,
+          cursor: 'help', whiteSpace: 'nowrap',
+        }}>
+          {hasRed ? '🔴' : '🟡'} ROE
+        </span>
+      );
+    }
 
     return (
       <>
@@ -2147,6 +2166,11 @@ function DataSection() {
           <button style={S.toggleBtn(accIcp)} onClick={() => { setAccIcp(!accIcp); setAccPage(1); }}>
             {accIcp ? '✅ ICP Only' : 'ICP Only'}
           </button>
+          {accData?.total != null && (
+            <span style={{ color: '#64748b', fontSize: 12, marginLeft: 8 }}>
+              {accData.total.toLocaleString()} accounts
+            </span>
+          )}
         </div>
         {accLoading && <div style={S.loading}>⟳ Loading accounts…</div>}
         {!accLoading && (
@@ -2155,47 +2179,56 @@ function DataSection() {
               <table style={S.table}>
                 <thead>
                   <tr>
-                    {['Account','Stage','EHR','ICP','Employees','Providers','Locations','Revenue','Est. Call Vol','Specialty','Source','Owner'].map(h =>
+                    {['Account Name','Stage','EHR','ICP','Revenue','Providers','Employees','Locations','Est. Call Vol','Specialty','Source Category','Owner','ROE'].map(h =>
                       <th key={h} style={S.th}>{h}</th>
                     )}
                   </tr>
                 </thead>
                 <tbody>
                   {accounts.length === 0 && (
-                    <tr><td colSpan={12} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No accounts found</td></tr>
+                    <tr><td colSpan={13} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No accounts found</td></tr>
                   )}
                   {accounts.map((a, i) => (
                     <tr key={a.accountId || i} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#252540'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
-                      <td style={S.td(i)}>
-                        {a.sfdcUrl
-                          ? <a href={a.sfdcUrl} target="_blank" rel="noreferrer" style={S.link}>{a.accountName}</a>
-                          : <span style={{ color: '#cbd5e1' }}>{a.accountName}</span>}
+                      <td style={{ ...S.td(i), maxWidth: 220 }}>
+                        {a.sfdcAccountLink
+                          ? <a href={a.sfdcAccountLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500 }}>{a.accountName}</a>
+                          : <span style={{ color: '#cbd5e1', fontWeight: 500 }}>{a.accountName}</span>}
                       </td>
-                      <td style={S.td(i)}><span style={S.muted}>{a.stage || '—'}</span></td>
+                      <td style={S.td(i)}>
+                        <span style={{
+                          background: '#6366f122', color: '#818cf8',
+                          border: '1px solid #6366f144', borderRadius: 4,
+                          padding: '1px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>{a.stage || '—'}</span>
+                      </td>
                       <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{a.ehr || '—'}</span></td>
                       <td style={S.td(i)}>{a.isICP ? <span style={S.icpBadge}>ICP</span> : <span style={S.muted}>—</span>}</td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.employees} fieldKey="employees" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={a.annualRevenue != null ? a.annualRevenue : ''} fieldKey="annualRevenue" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.providers} fieldKey="providers" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={a.providers != null ? a.providers : ''} fieldKey="providers" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.locations} fieldKey="locations" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={a.employees != null ? a.employees : ''} fieldKey="employees" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.annualRevenue} fieldKey="annualRevenue" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={a.locations != null ? a.locations : ''} fieldKey="locations" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.monthlyCallVolume} fieldKey="monthlyCallVolume" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={a.estMonthlyCallVolume != null ? a.estMonthlyCallVolume : ''} fieldKey="monthlyCallVolume" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}>
-                        <InlineEdit value={a.specialty} fieldKey="specialty" accountId={a.accountId} onSave={handleInlineEdit} />
+                      <td style={{ ...S.td(i), maxWidth: 140 }}>
+                        <InlineEdit value={a.specialty || ''} fieldKey="specialty" accountId={a.accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}><span style={S.muted}>{a.sourceCategory || '—'}</span></td>
                       <td style={S.td(i)}><span style={S.muted}>{a.agentsTeamOwner || '—'}</span></td>
+                      <td style={S.td(i)}>
+                        <RoeBadge issues={Array.isArray(a.potentialRoeIssue) ? a.potentialRoeIssue : (a.potentialRoeIssue ? [a.potentialRoeIssue] : [])} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2326,17 +2359,39 @@ function DataSection() {
     );
   }
 
+  // Preload counts for header badges
+  const { data: accCountData } = useSWR('/api/accounts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
+  const { data: conCountData } = useSWR('/api/sfdc-contacts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
+  const { data: oppCountData } = useSWR('/api/opportunities?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
+
+  function CountBadge({ n }) {
+    if (n == null) return null;
+    return <span style={{
+      background: '#6366f122', color: '#818cf8',
+      border: '1px solid #6366f144', borderRadius: 10,
+      padding: '1px 7px', fontSize: 10, fontWeight: 700, marginLeft: 5,
+    }}>{n.toLocaleString()}</span>;
+  }
+
   return (
     <div style={S.container}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#e2e8f0' }}>🗂 Data Explorer</h2>
-        <span style={{ color: '#64748b', fontSize: 12 }}>Accounts · Contacts · Opportunities</span>
+        <span style={{ color: '#64748b', fontSize: 12 }}>
+          Full Notion pipeline · SFDC contacts · Opportunities
+        </span>
       </div>
 
       <div style={S.subTabBar}>
-        {[['accounts','📋 Accounts'],['contacts','👤 Contacts'],['opportunities','💼 Opportunities']].map(([id, label]) => (
-          <button key={id} style={S.subTab(subTab === id)} onClick={() => setSubTab(id)}>{label}</button>
-        ))}
+        <button style={S.subTab(subTab === 'accounts')} onClick={() => setSubTab('accounts')}>
+          📋 Accounts<CountBadge n={accCountData?.total} />
+        </button>
+        <button style={S.subTab(subTab === 'contacts')} onClick={() => setSubTab('contacts')}>
+          👤 Contacts<CountBadge n={conCountData?.total} />
+        </button>
+        <button style={S.subTab(subTab === 'opportunities')} onClick={() => setSubTab('opportunities')}>
+          💼 Opportunities<CountBadge n={oppCountData?.total} />
+        </button>
       </div>
 
       {subTab === 'accounts'      && <AccountsTable />}

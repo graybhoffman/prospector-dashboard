@@ -1,7 +1,7 @@
 /**
  * /api/opportunities — GET
  *
- * Returns paginated opportunities from the bundled agent_opps_export.csv.
+ * Returns paginated opportunities from data/pipeline_opps.json.
  *
  * Query params:
  *   search    text search on opp name, account name
@@ -17,35 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const CSV_PATH = path.join(process.cwd(), 'data', 'agent_opps_export.csv');
-
-function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',');
-
-  return lines.slice(1).map(line => {
-    // simple CSV parse (handles quoted fields)
-    const values = [];
-    let current = '';
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') {
-        inQuotes = !inQuotes;
-      } else if (line[i] === ',' && !inQuotes) {
-        values.push(current);
-        current = '';
-      } else {
-        current += line[i];
-      }
-    }
-    values.push(current);
-
-    const obj = {};
-    headers.forEach((h, i) => { obj[h.trim()] = (values[i] || '').trim(); });
-    return obj;
-  });
-}
+const JSON_PATH = path.join(process.cwd(), 'data', 'pipeline_opps.json');
 
 let cache = null;
 let cacheLoadedAt = 0;
@@ -55,28 +27,27 @@ function loadOpps() {
   const now = Date.now();
   if (cache && now - cacheLoadedAt < CACHE_TTL) return cache;
   try {
-    const raw = fs.readFileSync(CSV_PATH, 'utf8');
-    const rows = parseCSV(raw);
+    const rows = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
     cache = rows.map(r => ({
-      opportunityId: r['Opportunity ID'] || '',
-      oppName:       r['Opportunity Name'] || '',
-      sfdcUrl:       r['SFDC URL'] || '',
-      accountName:   r['Account Name'] || '',
-      accountId:     r['Account ID'] || '',
-      stage:         r['Stage (Raw)'] || r['Stage Bucket'] || '',
-      stageBucket:   r['Stage Bucket'] || '',
-      ehr:           r['EHR (Normalized)'] || r['EHR (Raw)'] || '',
-      acv:           parseFloat(r['ACV / Amount ($)']) || null,
-      closeDate:     r['Close Date'] || '',
-      createdDate:   r['Created Date'] || '',
-      owner:         r['Owner'] || '',
-      employees:     r['Employees'] || '',
+      opportunityId:  r['Opportunity ID'] || '',
+      oppName:        r['Opportunity Name'] || '',
+      sfdcUrl:        r['SFDC URL'] || '',
+      accountName:    r['Account Name'] || '',
+      accountId:      r['Account ID'] || '',
+      stage:          r['Stage (Raw)'] || r['Stage Bucket'] || '',
+      stageBucket:    r['Stage Bucket'] || '',
+      ehr:            r['EHR (Normalized)'] || r['EHR (Raw)'] || '',
+      acv:            parseFloat(r['ACV / Amount ($)']) || null,
+      closeDate:      r['Close Date'] || '',
+      createdDate:    r['Created Date'] || '',
+      owner:          r['Owner'] || '',
+      employees:      r['Employees'] || '',
       employeeBucket: r['Employee Bucket'] || '',
     }));
     cacheLoadedAt = now;
     return cache;
   } catch (err) {
-    console.error('[opportunities] Failed to load CSV:', err.message);
+    console.error('[opportunities] Failed to load pipeline_opps.json:', err.message);
     return [];
   }
 }

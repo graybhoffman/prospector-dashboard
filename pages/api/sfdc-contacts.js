@@ -1,7 +1,7 @@
 /**
  * /api/sfdc-contacts — GET
  *
- * Returns paginated SFDC contacts from the bundled export.
+ * Returns paginated SFDC contacts from data/sfdc_contacts.json.
  *
  * Query params:
  *   search         text search on name, title, email, account
@@ -16,9 +16,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const DATA_PATH = path.join(process.cwd(), 'data', 'sfdc_contacts_export.json');
+const DATA_PATH = path.join(process.cwd(), 'data', 'sfdc_contacts.json');
 
-// Target persona titles (operations, admin, clinical leadership, IT)
 const TARGET_TITLE_KEYWORDS = [
   'ceo','coo','cio','cto','chief','president','vp','vice president',
   'director','administrator','manager','operations','practice manager',
@@ -41,8 +40,7 @@ function loadContacts() {
   const now = Date.now();
   if (cache && now - cacheLoadedAt < CACHE_TTL) return cache;
   try {
-    const raw = fs.readFileSync(DATA_PATH, 'utf8');
-    const raw_contacts = JSON.parse(raw);
+    const raw_contacts = JSON.parse(fs.readFileSync(DATA_PATH, 'utf8'));
     cache = raw_contacts.map(c => ({
       contactId:      c.Id,
       firstName:      c.FirstName || '',
