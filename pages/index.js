@@ -4154,6 +4154,9 @@ function AccountsDataTab() {
           { label: 'Has Stage',   params: { has_stage: 'true' } },
           { label: 'ROE Flagged', params: { has_roe: 'true' } },
           { label: 'Excluded',    params: { exclude_from_reporting: 'true', includeExcluded: 'true' } },
+          { label: 'MEDITECH',    params: { ehr: 'MEDITECH' } },
+          { label: 'MM X-Sell',   params: { source_category: 'MM Customers (x-sell)' } },
+          { label: 'Partners',    params: { source_category: 'Partnerships' } },
         ]}
       />
     </div>
