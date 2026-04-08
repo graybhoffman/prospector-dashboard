@@ -115,7 +115,12 @@ export default async function handler(req, res) {
     conditions.push('agents_icp = TRUE');
   }
   if (active_only === 'true') {
-    conditions.push(`(stage_normalized NOT IN ('Closed-Won', 'Closed-Lost') OR stage_normalized IS NULL)`);
+    const CLOSED_STAGES = [
+      'Closed-Won', 'Closed Won', 'Closed-Lost', 'Closed Lost',
+      'Closed Lost / Nurture', 'Lost', 'Disqualified',
+    ];
+    const closedPlaceholders = CLOSED_STAGES.map((s) => addParam(s));
+    conditions.push(`(stage_normalized NOT IN (${closedPlaceholders.join(',')}) OR stage_normalized IS NULL)`);
   }
   if (closed_won === 'true') {
     conditions.push(`stage_normalized ILIKE '%Closed%Won%'`);

@@ -2915,11 +2915,436 @@ function ManageTab() {
         <button style={S.subTab(subTab === 'accounts')} onClick={() => setSubTab('accounts')}>📋 Accounts</button>
         <button style={S.subTab(subTab === 'dedup')} onClick={() => setSubTab('dedup')}>🔁 Dedup Queue</button>
         <button style={S.subTab(subTab === 'synclog')} onClick={() => setSubTab('synclog')}>🕐 Sync Log</button>
+        <button style={S.subTab(subTab === 'teams')} onClick={() => setSubTab('teams')}>👥 Teams &amp; Users</button>
       </div>
 
       {subTab === 'accounts' && <AccountsManageTable />}
       {subTab === 'dedup'    && <DedupQueueTab />}
       {subTab === 'synclog'  && <SyncLogTab />}
+      {subTab === 'teams'    && <TeamsSettings />}
+    </div>
+  );
+}
+
+// ─── Data Quality Banner ─────────────────────────────────────────────────────
+function DataQualityBanner() {
+  const { data, error } = useSWR('/api/data-quality', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 60_000,
+  });
+
+  if (!data || error) return null;
+
+  const { agents_icp_pct, target_persona_pct, outcomes_pct } = data;
+  const allGood = agents_icp_pct >= 95 && target_persona_pct >= 95 && outcomes_pct >= 95;
+  const anyBad  = agents_icp_pct < 80 || target_persona_pct < 80 || outcomes_pct < 80;
+
+  if (allGood) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', background: C.green + '11', border: `1px solid ${C.green}33`, borderRadius: 8, fontSize: 11, color: C.green, marginBottom: 12 }}>
+        ✅ Data quality: good
+      </div>
+    );
+  }
+
+  const metrics = [
+    { label: 'ICP field', value: agents_icp_pct },
+    { label: 'Contact personas', value: target_persona_pct },
+    { label: 'Call outcomes', value: outcomes_pct },
+  ].filter(m => m.value < 95);
+
+  const chips = metrics.map(m => {
+    const color = m.value >= 80 ? C.amber : C.red;
+    return (
+      <span key={m.label} style={{
+        background: color + '22', color, border: `1px solid ${color}44`,
+        borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600,
+      }}>
+        {m.label}: {m.value}% populated
+      </span>
+    );
+  });
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+      padding: '8px 14px', background: C.amber + '11',
+      border: `1px solid ${C.amber}44`, borderRadius: 8, fontSize: 12,
+      color: C.amber, marginBottom: 12,
+    }}>
+      <span>⚠️ Data quality:</span>
+      {chips}
+      <span style={{ color: C.textMuted, fontSize: 11 }}>— some filters may not work correctly</span>
+    </div>
+  );
+}
+
+// ─── Pipeline Pulse Section ───────────────────────────────────────────────────
+function PipelinePulseSection() {
+  const { data, error, isLoading, mutate } = useSWR('/api/pipeline-pulse', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 5 * 60_000,
+  });
+
+  const [nextStepDraft, setNextStepDraft] = useState({});
+  const [editingId, setEditingId] = useState(null);
+
+  async function saveNextStep(accountId, value) {
+    try {
+      await fetch('/api/accounts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId, field: 'next_step', value }),
+      });
+      mutate();
+    } catch (e) {
+      console.error('saveNextStep failed:', e);
+    }
+  }
+
+  const accounts = data?.accounts || [];
+
+  const STAGE_BADGE_COLORS = {
+    'Discovery':         C.amber,
+    'SQL':               C.purple,
+    'Disco Scheduled':   C.blue,
+    'Negotiations':      C.teal,
+    'Pilot Deployment':  C.green,
+    'Full Deployment':   C.green,
+  };
+
+  function alertIcon(days) {
+    if (days == null) return '❓';
+    if (days > 7)  return '🔴';
+    if (days >= 4) return '⚠️';
+    return '✅';
+  }
+
+  function daysBadgeColor(days) {
+    if (days == null) return C.textMuted;
+    if (days > 7)  return C.red;
+    if (days >= 4) return C.amber;
+    return C.green;
+  }
+
+  function relDate(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (diff === 0) return 'today';
+    if (diff === 1) return '1d ago';
+    return `${diff}d ago`;
+  }
+
+  const thS = {
+    padding: '7px 10px', textAlign: 'left', color: C.textMuted,
+    fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`,
+    textTransform: 'uppercase', letterSpacing: '0.3px', background: C.surface,
+    whiteSpace: 'nowrap',
+  };
+  const tdS = { padding: '6px 10px', fontSize: 12, borderBottom: `1px solid ${C.border}1a`, color: C.textSec, verticalAlign: 'middle' };
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ color: C.textPri, fontWeight: 700, fontSize: 15 }}>
+          📡 Pipeline Pulse — Discovery &amp; Beyond
+          {accounts.length > 0 && <span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12, marginLeft: 8 }}>({accounts.length} accounts)</span>}
+        </div>
+        <div style={{ color: C.textMuted, fontSize: 11, display: 'flex', gap: 12 }}>
+          <span style={{ color: C.green }}>✅ ≤3d</span>
+          <span style={{ color: C.amber }}>⚠️ 4–7d</span>
+          <span style={{ color: C.red }}>🔴 &gt;7d</span>
+        </div>
+      </div>
+
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: C.textMuted, fontSize: 13 }}>⟳ Loading Pipeline Pulse…</div>
+      )}
+      {error && (
+        <div style={{ color: C.red, fontSize: 13, padding: '10px 0' }}>⚠ Failed to load Pipeline Pulse.</div>
+      )}
+
+      {!isLoading && accounts.length === 0 && (
+        <div style={{ color: C.textMuted, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>
+          No Discovery+ accounts found. Accounts in Discovery, SQL, Negotiations, Pilot or Full Deployment will appear here.
+        </div>
+      )}
+
+      {accounts.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+              <thead>
+                <tr>
+                  <th style={thS}>Alert</th>
+                  <th style={thS}>Account</th>
+                  <th style={thS}>Stage</th>
+                  <th style={{ ...thS, textAlign: 'right' }}>ACV</th>
+                  <th style={thS}>Owner</th>
+                  <th style={thS}>Last Touch</th>
+                  <th style={{ ...thS, textAlign: 'center' }}>Days</th>
+                  <th style={{ ...thS, minWidth: 200 }}>Next Step</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map((a) => {
+                  const days  = a.days_since_touch != null ? parseInt(a.days_since_touch, 10) : null;
+                  const color = daysBadgeColor(days);
+                  const isEditing = editingId === a.id;
+                  const draftVal  = nextStepDraft[a.id] ?? (a.next_step || '');
+                  return (
+                    <tr key={a.id} style={{ transition: 'background 0.1s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <td style={{ ...tdS, fontSize: 16, textAlign: 'center' }}>{alertIcon(days)}</td>
+                      <td style={tdS}>
+                        {a.sfdc_link
+                          ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.accent, fontWeight: 500, textDecoration: 'none' }}>{a.name}</a>
+                          : <span style={{ color: C.textPri, fontWeight: 500 }}>{a.name}</span>}
+                      </td>
+                      <td style={tdS}>
+                        <span style={{
+                          background: (STAGE_BADGE_COLORS[a.agents_stage] || C.blue) + '22',
+                          color:      STAGE_BADGE_COLORS[a.agents_stage] || C.blue,
+                          border:     `1px solid ${(STAGE_BADGE_COLORS[a.agents_stage] || C.blue)}44`,
+                          borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>{a.agents_stage || '—'}</span>
+                      </td>
+                      <td style={{ ...tdS, textAlign: 'right', color: C.green }}>
+                        {a.acv ? fmt(a.acv, 'currency') : '—'}
+                      </td>
+                      <td style={tdS}>{a.agents_owner || '—'}</td>
+                      <td style={{ ...tdS, whiteSpace: 'nowrap' }}>
+                        <span style={{ color: color }}>{relDate(a.last_touch_date)}</span>
+                      </td>
+                      <td style={{ ...tdS, textAlign: 'center' }}>
+                        {days != null
+                          ? <span style={{ color, fontWeight: 700, fontSize: 14 }}>{days}</span>
+                          : <span style={{ color: C.textMuted }}>—</span>}
+                      </td>
+                      <td style={tdS}>
+                        {isEditing
+                          ? (
+                            <input
+                              autoFocus
+                              value={draftVal}
+                              onChange={e => setNextStepDraft(prev => ({ ...prev, [a.id]: e.target.value }))}
+                              onBlur={() => { saveNextStep(a.sfdc_id || String(a.id), draftVal); setEditingId(null); }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { saveNextStep(a.sfdc_id || String(a.id), draftVal); setEditingId(null); }
+                                if (e.key === 'Escape') setEditingId(null);
+                              }}
+                              style={{ background: C.surface, color: C.textPri, border: `1px solid ${C.accent}`, borderRadius: 4, padding: '3px 8px', width: '100%', fontSize: 12, outline: 'none' }}
+                            />
+                          )
+                          : (
+                            <span
+                              onClick={() => { setNextStepDraft(prev => ({ ...prev, [a.id]: a.next_step || '' })); setEditingId(a.id); }}
+                              style={{ cursor: 'pointer', color: a.next_step ? C.textSec : C.textMuted, display: 'block', minWidth: 40 }}
+                              title="Click to edit"
+                            >
+                              {a.next_step || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>click to add…</span>}
+                            </span>
+                          )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Teams & Users Settings ───────────────────────────────────────────────────
+function TeamsSettings() {
+  const { data, mutate } = useSWR('/api/teams', fetcher, { revalidateOnFocus: false });
+  const teams = data?.teams || [];
+  const repOptions = data?.reps || [];
+
+  const [showModal, setShowModal] = useState(false);
+  const [editTeam, setEditTeam]   = useState(null); // null = create, object = edit
+  const [form, setForm]           = useState({ name: '', color: '#3b82f6', user_names: [] });
+  const [userInput, setUserInput] = useState('');
+  const [msg, setMsg]             = useState('');
+
+  function openCreate() { setForm({ name: '', color: '#3b82f6', user_names: [] }); setEditTeam(null); setUserInput(''); setShowModal(true); }
+  function openEdit(t)  { setForm({ name: t.name, color: t.color, user_names: [...(t.user_names || [])] }); setEditTeam(t); setUserInput(''); setShowModal(true); }
+  function closeModal() { setShowModal(false); setEditTeam(null); setMsg(''); }
+
+  function addUser(name) {
+    const n = name.trim();
+    if (n && !form.user_names.includes(n)) {
+      setForm(f => ({ ...f, user_names: [...f.user_names, n] }));
+    }
+    setUserInput('');
+  }
+
+  function removeUser(name) {
+    setForm(f => ({ ...f, user_names: f.user_names.filter(u => u !== name) }));
+  }
+
+  async function saveTeam() {
+    if (!form.name.trim()) { setMsg('Name is required'); return; }
+    try {
+      if (editTeam) {
+        await fetch(`/api/teams/${editTeam.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        });
+      } else {
+        await fetch('/api/teams', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        });
+      }
+      mutate();
+      closeModal();
+    } catch (e) { setMsg('Error: ' + e.message); }
+  }
+
+  async function deleteTeam(id) {
+    if (!confirm('Delete this team?')) return;
+    await fetch(`/api/teams/${id}`, { method: 'DELETE' });
+    mutate();
+  }
+
+  const S = {
+    card: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px', marginBottom: 10 },
+    btn: (color = C.accent) => ({ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }),
+    input: { background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textPri, padding: '6px 10px', fontSize: 12, outline: 'none', width: '100%' },
+  };
+
+  const suggestedReps = repOptions.filter(r => r.toLowerCase().includes(userInput.toLowerCase()) && !form.user_names.includes(r)).slice(0, 8);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div style={{ color: C.textPri, fontWeight: 700, fontSize: 15, marginBottom: 4 }}>👥 Teams &amp; Users</div>
+          <div style={{ color: C.textMuted, fontSize: 12 }}>Define teams to filter activity dashboards by your team vs. other sales motions.</div>
+        </div>
+        <button onClick={openCreate} style={S.btn(C.accent)}>+ Add Team</button>
+      </div>
+
+      {teams.length === 0 && (
+        <div style={{ color: C.textMuted, textAlign: 'center', padding: '30px 0', fontSize: 13 }}>No teams yet. Click "Add Team" to get started.</div>
+      )}
+
+      {teams.map(t => (
+        <div key={t.id} style={S.card}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 14, height: 14, borderRadius: '50%', background: t.color || C.accent, flexShrink: 0 }} />
+              <span style={{ color: C.textPri, fontWeight: 600, fontSize: 13 }}>{t.name}</span>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>{(t.user_names || []).length} member{(t.user_names || []).length !== 1 ? 's' : ''}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => openEdit(t)} style={S.btn(C.blue)}>Edit</button>
+              <button onClick={() => deleteTeam(t.id)} style={S.btn(C.red)}>Delete</button>
+            </div>
+          </div>
+          {(t.user_names || []).length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+              {t.user_names.map(u => (
+                <span key={u} style={{ background: (t.color || C.accent) + '22', color: t.color || C.accent, border: `1px solid ${(t.color || C.accent)}44`, borderRadius: 20, padding: '2px 10px', fontSize: 11 }}>{u}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Modal */}
+      {showModal && (
+        <>
+          <div onClick={closeModal} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9998 }} />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+            padding: '22px 26px', width: 460, maxWidth: '92vw',
+            zIndex: 9999, boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <span style={{ color: C.textPri, fontWeight: 700, fontSize: 15 }}>{editTeam ? 'Edit Team' : 'New Team'}</span>
+              <button onClick={closeModal} style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ color: C.textMuted, fontSize: 11, display: 'block', marginBottom: 4 }}>TEAM NAME</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Agents Team" style={S.input} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ color: C.textMuted, fontSize: 11, display: 'block', marginBottom: 4 }}>COLOR</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <input type="color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))}
+                  style={{ width: 40, height: 30, border: 'none', cursor: 'pointer', background: 'none' }} />
+                <span style={{ color: C.textMuted, fontSize: 12 }}>{form.color}</span>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ color: C.textMuted, fontSize: 11, display: 'block', marginBottom: 4 }}>ADD MEMBERS</label>
+              <div style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={userInput}
+                    onChange={e => setUserInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addUser(userInput); } }}
+                    placeholder="Type rep name…"
+                    style={{ ...S.input, flex: 1 }}
+                  />
+                  <button onClick={() => addUser(userInput)} style={S.btn(C.accent)}>Add</button>
+                </div>
+                {userInput.length > 0 && suggestedReps.length > 0 && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0,
+                    background: C.surface, border: `1px solid ${C.border}`,
+                    borderRadius: 8, marginTop: 4, zIndex: 100, maxHeight: 200, overflowY: 'auto',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                  }}>
+                    {suggestedReps.map(r => (
+                      <div key={r} onClick={() => addUser(r)}
+                        style={{ padding: '7px 12px', cursor: 'pointer', color: C.textSec, fontSize: 12 }}
+                        onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        {r}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {form.user_names.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                  {form.user_names.map(u => (
+                    <span key={u} style={{
+                      background: (form.color || C.accent) + '22', color: form.color || C.accent,
+                      border: `1px solid ${(form.color || C.accent)}44`,
+                      borderRadius: 20, padding: '2px 10px 2px 10px', fontSize: 11,
+                      display: 'flex', alignItems: 'center', gap: 5,
+                    }}>
+                      {u}
+                      <button onClick={() => removeUser(u)}
+                        style={{ background: 'none', border: 'none', color: form.color || C.accent, cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {msg && <div style={{ color: C.red, fontSize: 12, marginBottom: 10 }}>{msg}</div>}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button onClick={closeModal} style={S.btn(C.textMuted)}>Cancel</button>
+              <button onClick={saveTeam} style={S.btn(C.accent)}>💾 Save Team</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -3929,7 +4354,7 @@ export default function Home() {
   const userRole = session?.user?.role || 'viewer';
 
   const [activeTab, setActiveTab] = useState('pipeline');
-  const [dashSection, setDashSection] = useState('pipeline'); // 'pipeline' | 'activity'
+  const [dashSection, setDashSection] = useState('pipeline'); // 'pipeline' | 'activity' | 'icpaccounts' | 'pipelinepulse'
   const [filters, setFilters]     = useState(DEFAULT_PIPELINE_FILTERS);
   const [page, setPage]           = useState(1);
   const [tick, setTick]           = useState(0);
@@ -4063,10 +4488,13 @@ export default function Home() {
         {/* ── Dashboard Tab ── */}
         {activeTab === 'pipeline' && (
           <>
+            {/* Data Quality Banner */}
+            <DataQualityBanner />
+
             {/* Dashboard section selector */}
             <div style={{ display: 'flex', gap: 4, marginBottom: 18, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
-              {(['activity', 'pipeline', 'icpaccounts']).map((sec) => {
-                const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity', icpaccounts: '📋 ICP Accounts' };
+              {(['activity', 'pipeline', 'icpaccounts', 'pipelinepulse']).map((sec) => {
+                const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity', icpaccounts: '📋 ICP Accounts', pipelinepulse: '📡 Pipeline Pulse' };
                 const active = dashSection === sec;
                 return (
                   <button key={sec} onClick={() => setDashSection(sec)} style={{
@@ -4111,6 +4539,7 @@ export default function Home() {
                 <MarketOverviewSection globals={globals} title="🌍 ICP Account List - Detailed View" />
               </>
             )}
+            {dashSection === 'pipelinepulse' && <PipelinePulseSection />}
           </>
         )}
 

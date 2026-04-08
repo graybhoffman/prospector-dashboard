@@ -38,7 +38,7 @@ const EDITABLE_FIELDS = new Set([
   'agents_stage', 'agents_owner', 'enrichment_notes', 'agents_icp',
   'exclude_from_reporting', 'roe_flag_notes', 'specialty', 'ehr',
   'num_employees', 'num_providers', 'num_locations', 'annual_revenue',
-  'est_monthly_call_volume',
+  'est_monthly_call_volume', 'next_step',
 ]);
 
 // Whitelist of columns that can be used in ORDER BY (prevent SQL injection)
