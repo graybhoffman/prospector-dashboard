@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 import Head from 'next/head';
 import useSWR from 'swr';
 import {
@@ -2403,6 +2404,9 @@ function DataSection() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
+  const { data: session } = useSession();
+  const userRole = session?.user?.role || 'viewer';
+
   const [activeTab, setActiveTab] = useState('pipeline');
   const [filters, setFilters]     = useState(DEFAULT_PIPELINE_FILTERS);
   const [page, setPage]           = useState(1);
@@ -2508,6 +2512,25 @@ export default function Home() {
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('data', '🗂 Data')}
             </div>
+
+            {/* ── User pill ── */}
+            {session && (
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                {session.user.image && (
+                  <img src={session.user.image} alt="" style={{ width:24, height:24, borderRadius:'50%' }} />
+                )}
+                <span style={{ color:'#aaa', fontSize:12 }}>{session.user.name}</span>
+                <span style={{
+                  background: userRole==='admin'?'#7c3aed':'#1d4ed8',
+                  color:'#fff', fontSize:10, padding:'2px 6px',
+                  borderRadius:4, textTransform:'uppercase', fontWeight:700,
+                }}>{userRole}</span>
+                <button
+                  onClick={() => signOut()}
+                  style={{ color:'#666', fontSize:11, background:'none', border:'none', cursor:'pointer' }}
+                >Sign out</button>
+              </div>
+            )}
           </div>
         </div>
 
