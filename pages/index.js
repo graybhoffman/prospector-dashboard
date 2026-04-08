@@ -2031,7 +2031,7 @@ function DataSection() {
     if (conSearch) p.set('search', conSearch);
     if (conAccId)  p.set('accountId', conAccId);
     if (conTarget) p.set('targetPersona', 'true');
-    return `/api/sfdc-contacts?${p}`;
+    return `/api/contacts?${p}`;
   }
   function buildOppUrl() {
     const p = new URLSearchParams({ page: oppPage, pageSize: 50 });
@@ -2194,15 +2194,33 @@ function DataSection() {
                   {accounts.length === 0 && (
                     <tr><td colSpan={13} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No accounts found</td></tr>
                   )}
-                  {accounts.map((a, i) => (
-                    <tr key={a.accountId || i} style={{ transition: 'background 0.1s' }}
+                  {accounts.map((a, i) => {
+                    // Support both Postgres snake_case fields and legacy camelCase
+                    const accountId = a.sfdc_id || a.sfdcAccountId || a.accountId || String(a.id);
+                    const accountName = a.name || a.accountName || '—';
+                    const sfdcLink = a.sfdc_link || a.sfdcAccountLink;
+                    const excluded = a.exclude_from_reporting || a.excludeFromReporting;
+                    const stage = a.agents_stage || a.stage;
+                    const ehr = a.ehr;
+                    const isICP = a.agents_icp || a.isICP;
+                    const revenue = a.annual_revenue != null ? a.annual_revenue : a.annualRevenue;
+                    const providers = a.num_providers != null ? a.num_providers : a.providers;
+                    const employees = a.num_employees != null ? a.num_employees : a.employees;
+                    const locations = a.num_locations != null ? a.num_locations : a.locations;
+                    const callVol = a.est_monthly_call_volume != null ? a.est_monthly_call_volume : a.estMonthlyCallVolume;
+                    const specialty = a.specialty;
+                    const sourceCategory = a.source_category || a.sourceCategory;
+                    const owner = a.agents_owner || a.agentsTeamOwner;
+                    const roeIssues = Array.isArray(a.potential_roe_issue) ? a.potential_roe_issue : (Array.isArray(a.potentialRoeIssue) ? a.potentialRoeIssue : (a.potentialRoeIssue ? [a.potentialRoeIssue] : []));
+                    return (
+                    <tr key={accountId} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#252540'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
                       <td style={{ ...S.td(i), maxWidth: 220 }}>
-                        {a.sfdcAccountLink
-                          ? <a href={a.sfdcAccountLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500, ...(a.excludeFromReporting ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{a.accountName}</a>
-                          : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(a.excludeFromReporting ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{a.accountName}</span>}
-                        {a.excludeFromReporting && (
+                        {sfdcLink
+                          ? <a href={sfdcLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</a>
+                          : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</span>}
+                        {excluded && (
                           <span style={{background:'#374151', color:'#9ca3af', fontSize:10, padding:'1px 5px', borderRadius:3, marginLeft:6}}>excluded</span>
                         )}
                       </td>
@@ -2211,35 +2229,36 @@ function DataSection() {
                           background: '#6366f122', color: '#818cf8',
                           border: '1px solid #6366f144', borderRadius: 4,
                           padding: '1px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-                        }}>{a.stage || '—'}</span>
+                        }}>{stage || '—'}</span>
                       </td>
-                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{a.ehr || '—'}</span></td>
-                      <td style={S.td(i)}>{a.isICP ? <span style={S.icpBadge}>ICP</span> : <span style={S.muted}>—</span>}</td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{ehr || '—'}</span></td>
+                      <td style={S.td(i)}>{isICP ? <span style={S.icpBadge}>ICP</span> : <span style={S.muted}>—</span>}</td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.annualRevenue != null ? a.annualRevenue : ''} fieldKey="annualRevenue" accountId={a.accountId} onSave={handleInlineEdit} />
-                      </td>
-                      <td style={S.td(i)}>
-                        <InlineEdit value={a.providers != null ? a.providers : ''} fieldKey="providers" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={revenue != null ? revenue : ''} fieldKey="annual_revenue" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.employees != null ? a.employees : ''} fieldKey="employees" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={providers != null ? providers : ''} fieldKey="num_providers" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.locations != null ? a.locations : ''} fieldKey="locations" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={employees != null ? employees : ''} fieldKey="num_employees" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}>
-                        <InlineEdit value={a.estMonthlyCallVolume != null ? a.estMonthlyCallVolume : ''} fieldKey="monthlyCallVolume" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={locations != null ? locations : ''} fieldKey="num_locations" accountId={accountId} onSave={handleInlineEdit} />
+                      </td>
+                      <td style={S.td(i)}>
+                        <InlineEdit value={callVol != null ? callVol : ''} fieldKey="est_monthly_call_volume" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={{ ...S.td(i), maxWidth: 140 }}>
-                        <InlineEdit value={a.specialty || ''} fieldKey="specialty" accountId={a.accountId} onSave={handleInlineEdit} />
+                        <InlineEdit value={specialty || ''} fieldKey="specialty" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}><span style={S.muted}>{a.sourceCategory || '—'}</span></td>
-                      <td style={S.td(i)}><span style={S.muted}>{a.agentsTeamOwner || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{sourceCategory || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{owner || '—'}</span></td>
                       <td style={S.td(i)}>
-                        <RoeBadge issues={Array.isArray(a.potentialRoeIssue) ? a.potentialRoeIssue : (a.potentialRoeIssue ? [a.potentialRoeIssue] : [])} />
+                        <RoeBadge issues={roeIssues} />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2279,15 +2298,15 @@ function DataSection() {
                     <tr><td colSpan={6} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No contacts found</td></tr>
                   )}
                   {contacts.map((c, i) => (
-                    <tr key={c.contactId || i}
+                    <tr key={c.sfdc_id || c.contactId || i}
                       onMouseEnter={e => e.currentTarget.style.background = '#252540'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
-                      <td style={S.td(i)}><span style={{ color: '#cbd5e1', fontWeight: 500 }}>{`${c.firstName} ${c.lastName}`.trim() || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#cbd5e1', fontWeight: 500 }}>{c.full_name || `${c.first_name || c.firstName || ''} ${c.last_name || c.lastName || ''}`.trim() || '—'}</span></td>
                       <td style={S.td(i)}><span style={S.muted}>{c.title || '—'}</span></td>
-                      <td style={S.td(i)}>{c.email ? <a href={`mailto:${c.email}`} style={S.link}>{c.email}</a> : <span style={S.muted}>—</span>}</td>
+                      <td style={S.td(i)}>{(c.email) ? <a href={`mailto:${c.email}`} style={S.link}>{c.email}</a> : <span style={S.muted}>—</span>}</td>
                       <td style={S.td(i)}><span style={S.muted}>{c.phone || '—'}</span></td>
-                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{c.accountName || '—'}</span></td>
-                      <td style={S.td(i)}>{c.targetPersona ? <span style={S.icpBadge}>✓</span> : <span style={S.muted}>—</span>}</td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{c.account_sfdc_id || c.accountName || '—'}</span></td>
+                      <td style={S.td(i)}>{(c.target_persona || c.targetPersona) ? <span style={S.icpBadge}>✓</span> : <span style={S.muted}>—</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2341,23 +2360,34 @@ function DataSection() {
                   {opps.length === 0 && (
                     <tr><td colSpan={7} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No opportunities found</td></tr>
                   )}
-                  {opps.map((o, i) => (
-                    <tr key={o.opportunityId || i}
+                  {opps.map((o, i) => {
+                    // Support both Postgres snake_case and legacy camelCase
+                    const oppName = o.name || o.oppName;
+                    const sfdcUrl = o.sfdc_link || o.sfdcUrl;
+                    const accountName = o.account_name || o.accountName;
+                    const stage = o.stage_normalized || o.stageBucket || o.stage;
+                    const ehr = o.ehr;
+                    const acv = o.acv;
+                    const closeDate = o.close_date || o.closeDate;
+                    const owner = o.owner;
+                    return (
+                    <tr key={o.sfdc_id || o.opportunityId || i}
                       onMouseEnter={e => e.currentTarget.style.background = '#252540'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
                       <td style={S.td(i)}>
-                        {o.sfdcUrl
-                          ? <a href={o.sfdcUrl} target="_blank" rel="noreferrer" style={S.link}>{o.oppName}</a>
-                          : <span style={{ color: '#cbd5e1' }}>{o.oppName || '—'}</span>}
+                        {sfdcUrl
+                          ? <a href={sfdcUrl} target="_blank" rel="noreferrer" style={S.link}>{oppName}</a>
+                          : <span style={{ color: '#cbd5e1' }}>{oppName || '—'}</span>}
                       </td>
-                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{o.accountName || '—'}</span></td>
-                      <td style={S.td(i)}><span style={S.muted}>{o.stageBucket || o.stage || '—'}</span></td>
-                      <td style={S.td(i)}><span style={{ color: '#60a5fa' }}>{o.ehr || '—'}</span></td>
-                      <td style={S.td(i)}><span style={{ color: '#22c55e' }}>{o.acv ? fmt$(o.acv) : '—'}</span></td>
-                      <td style={S.td(i)}><span style={S.muted}>{o.closeDate || '—'}</span></td>
-                      <td style={S.td(i)}><span style={S.muted}>{o.owner || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{accountName || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{stage || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#60a5fa' }}>{ehr || '—'}</span></td>
+                      <td style={S.td(i)}><span style={{ color: '#22c55e' }}>{acv ? fmt$(acv) : '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{closeDate || '—'}</span></td>
+                      <td style={S.td(i)}><span style={S.muted}>{owner || '—'}</span></td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2370,7 +2400,7 @@ function DataSection() {
 
   // Preload counts for header badges
   const { data: accCountData } = useSWR('/api/accounts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
-  const { data: conCountData } = useSWR('/api/sfdc-contacts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
+  const { data: conCountData } = useSWR('/api/contacts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
   const { data: oppCountData } = useSWR('/api/opportunities?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
 
   function CountBadge({ n }) {
@@ -2406,6 +2436,375 @@ function DataSection() {
       {subTab === 'accounts'      && <AccountsTable />}
       {subTab === 'contacts'      && <ContactsTable />}
       {subTab === 'opportunities' && <OpportunitiesTable />}
+    </div>
+  );
+}
+
+// ─── Manage Tab ───────────────────────────────────────────────────────────────
+function ManageTab() {
+  const [subTab, setSubTab] = useState('accounts');
+  const [search, setSearch] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
+  const [stageFilter, setStageFilter] = useState('');
+  const [showExcluded, setShowExcluded] = useState(false);
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkStage, setBulkStage] = useState('');
+  const [bulkOwner, setBulkOwner] = useState('');
+  const [bulkMsg, setBulkMsg] = useState('');
+  const searchTimerRef = useRef(null);
+
+  const STAGE_OPTIONS = [
+    'Prospect','Outreach','Discovery','SQL','Negotiations',
+    'Pilot Deployment','Full Deployment','Closed-Won',
+  ];
+
+  function buildAccUrl() {
+    const p = new URLSearchParams({ page, pageSize: 50 });
+    if (search) p.set('search', search);
+    if (stageFilter) p.set('stage', stageFilter);
+    if (showExcluded) p.set('includeExcluded', 'true');
+    return `/api/accounts?${p}`;
+  }
+
+  const { data: accData, isLoading: accLoading, mutate: accMutate } = useSWR(
+    subTab === 'accounts' ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false }
+  );
+  const { data: syncData } = useSWR(subTab === 'synclog' ? '/api/sync-log' : null, fetcher, { revalidateOnFocus: false });
+  const { data: dedupData, mutate: dedupMutate } = useSWR(subTab === 'dedup' ? '/api/dedup' : null, fetcher, { revalidateOnFocus: false });
+
+  function handleSearchInput(val) {
+    setSearchDraft(val);
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => { setSearch(val); setPage(1); }, 350);
+  }
+
+  async function handleInlineEdit(accountId, field, value) {
+    try {
+      const r = await fetch('/api/accounts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId, field, value }),
+      });
+      if (!r.ok) { const e = await r.json(); alert('Edit failed: ' + e.error); return; }
+      accMutate();
+    } catch (e) { console.error('Inline edit failed:', e); }
+  }
+
+  async function handleBulkAction(action) {
+    if (!selected.size) return;
+    const ids = [...selected];
+    let payload = {};
+    if (action === 'exclude') payload = { exclude_from_reporting: true };
+    else if (action === 'include') payload = { exclude_from_reporting: false };
+    else if (action === 'set_stage') { if (!bulkStage) { setBulkMsg('Pick a stage first'); return; } payload = { agents_stage: bulkStage }; }
+    else if (action === 'set_owner') { if (!bulkOwner) { setBulkMsg('Enter an owner first'); return; } payload = { agents_owner: bulkOwner }; }
+
+    try {
+      const r = await fetch('/api/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk_update_accounts', ids, payload }),
+      });
+      const data = await r.json();
+      setBulkMsg(`✅ Updated ${data.rowsAffected || ids.length} records`);
+      setSelected(new Set());
+      accMutate();
+      setTimeout(() => setBulkMsg(''), 3000);
+    } catch (e) { setBulkMsg('Error: ' + e.message); }
+  }
+
+  async function handleDedupAction(id, action) {
+    try {
+      await fetch('/api/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action === 'approve' ? 'approve_dedup' : 'reject_dedup', payload: { id } }),
+      });
+      dedupMutate();
+    } catch (e) { console.error('Dedup action failed:', e); }
+  }
+
+  const S = {
+    container: { background: '#1a1d2e', borderRadius: 12, padding: '18px 20px', marginTop: 20, border: '1px solid #252535' },
+    subTabBar: { display: 'flex', gap: 4, marginBottom: 16 },
+    subTab: (active) => ({
+      background: active ? '#6366f122' : 'transparent',
+      color: active ? '#6366f1' : '#94a3b8',
+      border: `1px solid ${active ? '#6366f166' : 'transparent'}`,
+      borderRadius: 8, padding: '5px 14px', cursor: 'pointer',
+      fontSize: 12, fontWeight: active ? 600 : 400,
+    }),
+    filterRow: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' },
+    input: { background: '#0f1117', border: '1px solid #252535', borderRadius: 8, color: '#fff', padding: '6px 10px', fontSize: 12, outline: 'none' },
+    select: { background: '#0f1117', border: '1px solid #252535', borderRadius: 8, color: '#94a3b8', padding: '6px 10px', fontSize: 12, outline: 'none', cursor: 'pointer' },
+    btn: (color = '#6366f1') => ({ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }),
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 },
+    th: { padding: '7px 8px', color: '#64748b', borderBottom: '1px solid #252535', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: 500 },
+    td: (i) => ({ padding: '6px 8px', borderBottom: '1px solid #1e2235', background: i % 2 === 0 ? '#1a1d2e' : '#1e2240', whiteSpace: 'nowrap' }),
+    muted: { color: '#64748b' },
+    loading: { textAlign: 'center', padding: '40px 0', color: '#64748b', fontSize: 13 },
+    pagination: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, color: '#64748b', fontSize: 12 },
+  };
+
+  function Pagination({ page, setPage, total, ps = 50 }) {
+    const tp = Math.ceil(total / ps);
+    return (
+      <div style={S.pagination}>
+        <button style={{ ...S.btn('#6366f1'), opacity: page <= 1 ? 0.4 : 1 }} onClick={() => page > 1 && setPage(p => p - 1)} disabled={page <= 1}>← Prev</button>
+        <span>Page {page} of {tp} · {total.toLocaleString()} records</span>
+        <button style={{ ...S.btn('#6366f1'), opacity: page >= tp ? 0.4 : 1 }} onClick={() => page < tp && setPage(p => p + 1)} disabled={page >= tp}>Next →</button>
+      </div>
+    );
+  }
+
+  function InlineEditCell({ value, field, accountId }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState(String(value ?? ''));
+    if (!editing) return (
+      <span onClick={() => { setDraft(String(value ?? '')); setEditing(true); }}
+        title="Click to edit" style={{ cursor: 'text', minWidth: 30, display: 'inline-block', color: value ? '#cbd5e1' : '#475569' }}>
+        {value != null && value !== '' ? String(value) : '—'}
+      </span>
+    );
+    return (
+      <input
+        autoFocus value={draft} onChange={e => setDraft(e.target.value)}
+        onBlur={() => { handleInlineEdit(accountId, field, draft); setEditing(false); }}
+        onKeyDown={e => { if (e.key === 'Enter') { handleInlineEdit(accountId, field, draft); setEditing(false); } if (e.key === 'Escape') setEditing(false); }}
+        style={{ ...S.input, padding: '2px 6px', width: 120, fontSize: 11 }}
+      />
+    );
+  }
+
+  function AccountsManageTable() {
+    const accounts = accData?.accounts || [];
+    const total = accData?.total || 0;
+    const allSelected = accounts.length > 0 && accounts.every(a => selected.has(a.sfdc_id || String(a.id)));
+
+    function toggleAll() {
+      if (allSelected) setSelected(new Set());
+      else setSelected(new Set(accounts.map(a => a.sfdc_id || String(a.id))));
+    }
+
+    return (
+      <>
+        {/* Filters */}
+        <div style={S.filterRow}>
+          <input placeholder="🔍 Search accounts…" value={searchDraft} onChange={e => handleSearchInput(e.target.value)} style={{ ...S.input, width: 220 }} />
+          <select value={stageFilter} onChange={e => { setStageFilter(e.target.value); setPage(1); }} style={S.select}>
+            <option value="">All Stages</option>
+            {STAGE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <button style={{ ...S.btn('#22c55e'), opacity: showExcluded ? 1 : 0.6 }} onClick={() => { setShowExcluded(v => !v); setPage(1); }}>
+            {showExcluded ? '👁 Showing Excluded' : 'Show Excluded'}
+          </button>
+          {total > 0 && <span style={S.muted}>{total.toLocaleString()} accounts</span>}
+        </div>
+
+        {/* Bulk Actions */}
+        {selected.size > 0 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, padding: '8px 12px', background: '#252540', borderRadius: 8, flexWrap: 'wrap' }}>
+            <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 12 }}>{selected.size} selected</span>
+            <button style={S.btn('#ef4444')} onClick={() => handleBulkAction('exclude')}>🚫 Exclude from Reporting</button>
+            <button style={S.btn('#22c55e')} onClick={() => handleBulkAction('include')}>✅ Include in Reporting</button>
+            <select value={bulkStage} onChange={e => setBulkStage(e.target.value)} style={{ ...S.select, fontSize: 11 }}>
+              <option value="">Set Stage…</option>
+              {STAGE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+            {bulkStage && <button style={S.btn('#6366f1')} onClick={() => handleBulkAction('set_stage')}>Apply Stage</button>}
+            <input placeholder="Set Owner…" value={bulkOwner} onChange={e => setBulkOwner(e.target.value)} style={{ ...S.input, width: 140, fontSize: 11 }} />
+            {bulkOwner && <button style={S.btn('#f59e0b')} onClick={() => handleBulkAction('set_owner')}>Apply Owner</button>}
+            <button style={S.btn('#64748b')} onClick={() => setSelected(new Set())}>Clear</button>
+            {bulkMsg && <span style={{ color: '#22c55e', fontSize: 12 }}>{bulkMsg}</span>}
+          </div>
+        )}
+
+        {accLoading && <div style={S.loading}>⟳ Loading…</div>}
+        {!accLoading && (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={S.table}>
+                <thead>
+                  <tr>
+                    <th style={S.th}><input type="checkbox" checked={allSelected} onChange={toggleAll} /></th>
+                    {['Name','Stage','EHR','ICP','Revenue','Providers','Employees','Locs','Call Vol','Specialty','Owner','Source','ROE','SFDC'].map(h =>
+                      <th key={h} style={S.th}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {accounts.length === 0 && (
+                    <tr><td colSpan={15} style={{ ...S.td(0), textAlign: 'center', color: '#64748b', padding: '30px 0' }}>No accounts found</td></tr>
+                  )}
+                  {accounts.map((a, i) => {
+                    const aid = a.sfdc_id || String(a.id);
+                    const isSelected = selected.has(aid);
+                    return (
+                      <tr key={aid}
+                        style={{ background: isSelected ? '#312e5133' : '', transition: 'background 0.1s' }}
+                        onMouseEnter={e => !isSelected && (e.currentTarget.style.background = '#252540')}
+                        onMouseLeave={e => !isSelected && (e.currentTarget.style.background = '')}>
+                        <td style={S.td(i)}>
+                          <input type="checkbox" checked={isSelected}
+                            onChange={() => setSelected(prev => { const s = new Set(prev); s.has(aid) ? s.delete(aid) : s.add(aid); return s; })} />
+                        </td>
+                        <td style={{ ...S.td(i), maxWidth: 200 }}>
+                          {a.sfdc_link
+                            ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500, ...(a.exclude_from_reporting ? { opacity: 0.5, textDecoration: 'line-through' } : {}) }}>{a.name}</a>
+                            : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(a.exclude_from_reporting ? { opacity: 0.5, textDecoration: 'line-through' } : {}) }}>{a.name}</span>}
+                          {a.exclude_from_reporting && <span style={{ background: '#374151', color: '#9ca3af', fontSize: 10, padding: '1px 5px', borderRadius: 3, marginLeft: 5 }}>excl</span>}
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.agents_stage} field="agents_stage" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.ehr} field="ehr" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          {a.agents_icp
+                            ? <span style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>ICP</span>
+                            : <span style={S.muted}>—</span>}
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.annual_revenue != null ? a.annual_revenue : ''} field="annual_revenue" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.num_providers != null ? a.num_providers : ''} field="num_providers" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.num_employees != null ? a.num_employees : ''} field="num_employees" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.num_locations != null ? a.num_locations : ''} field="num_locations" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.est_monthly_call_volume != null ? a.est_monthly_call_volume : ''} field="est_monthly_call_volume" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.specialty || ''} field="specialty" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}>
+                          <InlineEditCell value={a.agents_owner || ''} field="agents_owner" accountId={aid} />
+                        </td>
+                        <td style={S.td(i)}><span style={S.muted}>{a.source_category || '—'}</span></td>
+                        <td style={S.td(i)}>
+                          {a.potential_roe_issue?.length
+                            ? <span style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', borderRadius: 4, padding: '1px 5px', fontSize: 10, fontWeight: 700 }}>🟡 ROE</span>
+                            : <span style={S.muted}>—</span>}
+                        </td>
+                        <td style={S.td(i)}>
+                          {a.sfdc_link ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', fontSize: 11 }}>↗</a> : <span style={S.muted}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {total > 0 && <Pagination page={page} setPage={setPage} total={total} />}
+          </>
+        )}
+      </>
+    );
+  }
+
+  function DedupQueueTab() {
+    const items = dedupData?.items || [];
+    if (!dedupData) return <div style={S.loading}>⟳ Loading dedup queue…</div>;
+    return (
+      <div>
+        <div style={{ color: '#64748b', fontSize: 12, marginBottom: 12 }}>
+          {items.length === 0 ? '✅ No pending dedup items' : `${items.length} pending items`}
+        </div>
+        {items.map((item, i) => (
+          <div key={item.id} style={{ background: '#111119', border: '1px solid #252535', borderRadius: 8, padding: '12px 16px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ color: '#a78bfa', fontWeight: 600, fontSize: 13 }}>{item.entity_type}</span>
+                <span style={{ color: '#64748b', fontSize: 11, marginLeft: 8 }}>{new Date(item.created_at).toLocaleDateString()}</span>
+                {item.confidence_score && <span style={{ background: '#22c55e22', color: '#22c55e', fontSize: 11, padding: '1px 6px', borderRadius: 4, marginLeft: 8 }}>Score: {item.confidence_score}</span>}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={S.btn('#22c55e')} onClick={() => handleDedupAction(item.id, 'approve')}>✓ Approve</button>
+                <button style={S.btn('#ef4444')} onClick={() => handleDedupAction(item.id, 'reject')}>✗ Reject</button>
+              </div>
+            </div>
+            {item.proposed_data && (
+              <pre style={{ color: '#94a3b8', fontSize: 11, marginTop: 8, overflowX: 'auto', maxHeight: 120, background: '#0a0a10', padding: 8, borderRadius: 4 }}>
+                {JSON.stringify(item.proposed_data, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function SyncLogTab() {
+    if (!syncData) return <div style={S.loading}>⟳ Loading sync log…</div>;
+    const { lastSyncByTable = [], recentEntries = [] } = syncData;
+    return (
+      <div>
+        <h3 style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Last Sync by Table</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, marginBottom: 24 }}>
+          {lastSyncByTable.map(row => (
+            <div key={row.table_name} style={{ background: '#111119', border: '1px solid #252535', borderRadius: 8, padding: '12px 16px' }}>
+              <div style={{ color: '#a78bfa', fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{row.table_name}</div>
+              <div style={{ color: '#64748b', fontSize: 11 }}>
+                <div>Synced: <span style={{ color: '#94a3b8' }}>{row.records_synced?.toLocaleString() || '—'}</span></div>
+                <div>Type: <span style={{ color: '#94a3b8' }}>{row.sync_type || '—'}</span></div>
+                <div>Last: <span style={{ color: '#94a3b8' }}>{row.completed_at ? new Date(row.completed_at).toLocaleString() : '—'}</span></div>
+                {row.errors > 0 && <div style={{ color: '#ef4444' }}>Errors: {row.errors}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Recent Sync History</h3>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={S.table}>
+            <thead>
+              <tr>{['Table','Type','Synced','Created','Updated','Errors','Completed','Notes'].map(h =>
+                <th key={h} style={S.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {recentEntries.map((r, i) => (
+                <tr key={r.id}>
+                  <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{r.table_name}</span></td>
+                  <td style={S.td(i)}><span style={S.muted}>{r.sync_type}</span></td>
+                  <td style={S.td(i)}>{r.records_synced?.toLocaleString() || '—'}</td>
+                  <td style={S.td(i)}>{r.records_created?.toLocaleString() || '—'}</td>
+                  <td style={S.td(i)}>{r.records_updated?.toLocaleString() || '—'}</td>
+                  <td style={S.td(i)}>{r.errors > 0 ? <span style={{ color: '#ef4444' }}>{r.errors}</span> : '0'}</td>
+                  <td style={S.td(i)}><span style={S.muted}>{r.completed_at ? new Date(r.completed_at).toLocaleString() : '—'}</span></td>
+                  <td style={{ ...S.td(i), maxWidth: 200, whiteSpace: 'normal' }}><span style={S.muted}>{r.notes || '—'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.container}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#e2e8f0' }}>⚙️ Data Management</h2>
+        <span style={{ color: '#64748b', fontSize: 12 }}>Neon Postgres · Inline edits are persistent</span>
+      </div>
+
+      <div style={S.subTabBar}>
+        <button style={S.subTab(subTab === 'accounts')} onClick={() => setSubTab('accounts')}>📋 Accounts</button>
+        <button style={S.subTab(subTab === 'dedup')} onClick={() => setSubTab('dedup')}>🔁 Dedup Queue</button>
+        <button style={S.subTab(subTab === 'synclog')} onClick={() => setSubTab('synclog')}>🕐 Sync Log</button>
+      </div>
+
+      {subTab === 'accounts' && <AccountsManageTable />}
+      {subTab === 'dedup'    && <DedupQueueTab />}
+      {subTab === 'synclog'  && <SyncLogTab />}
     </div>
   );
 }
@@ -2519,6 +2918,7 @@ export default function Home() {
               {tabBtn('pipeline', '📊 Pipeline')}
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('data', '🗂 Data')}
+              {tabBtn('manage', '⚙️ Manage')}
             </div>
 
             {/* ── User pill ── */}
@@ -2567,6 +2967,9 @@ export default function Home() {
 
         {/* ── Data Tab ── */}
         {activeTab === 'data' && <DataSection />}
+
+        {/* ── Manage Tab ── */}
+        {activeTab === 'manage' && <ManageTab />}
 
       </div>
     </div>
