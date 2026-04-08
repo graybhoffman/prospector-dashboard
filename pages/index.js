@@ -577,7 +577,7 @@ function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summ
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>ICP criteria:</p>
               <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, lineHeight: 1.8 }}>
                 <li>Healthcare practice (not a vendor/tech company)</li>
-                <li>Target EHR: eCW, Athena, ModMed, AdvancedMD, MEDITECH, or Epic</li>
+                <li>Target EHR: eCW, Athena/Athenahealth, ModMed, AdvancedMD, MEDITECH, or Epic</li>
                 <li>Size: $10M+ revenue OR 25+ providers OR 50+ employees OR 10+ locations</li>
               </ul>
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>Deployed ARR:</p>
@@ -4096,6 +4096,14 @@ function AccountsDataTab() {
   ];
 
   const [showQueue, setShowQueue] = React.useState(false);
+  const [queueCount, setQueueCount] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch('/api/accounts?queue=enrichment&limit=1&page=1')
+      .then(r => r.json())
+      .then(data => setQueueCount(data.total || 0))
+      .catch(() => setQueueCount(0));
+  }, []);
 
   const handlePromote = React.useCallback(async (accountId) => {
     try {
@@ -4135,7 +4143,7 @@ function AccountsDataTab() {
             border: `1px solid ${showQueue ? '#7c3aed' : '#4c1d95'}`,
           }}
         >
-          {showQueue ? '← Main Pipeline' : '🔬 Enrichment Queue (1,246)'}
+          {showQueue ? '← Main Pipeline' : `🔬 Enrichment Queue (${queueCount === null ? '...' : queueCount.toLocaleString()})`}
         </button>
       </div>
       {showQueue && (

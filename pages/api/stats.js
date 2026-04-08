@@ -36,6 +36,7 @@ export default async function handler(req, res) {
       deployedArrRes,
       // Stats
       totalRes,
+      confirmedIcpRes,
       stageRes,
       ehrRes,
       specialtyRes,
@@ -60,6 +61,8 @@ export default async function handler(req, res) {
 
       // ── Stats ─────────────────────────────────────────────────────────────
       query(`SELECT COUNT(*) FROM accounts ${BASE}`),
+
+      query(`SELECT COUNT(*) FROM accounts WHERE agents_icp = TRUE AND db_status = 'main' AND (exclude_from_reporting IS NOT TRUE)`),
 
       query(`SELECT agents_stage   AS val, COUNT(*) FROM accounts ${BASE} GROUP BY 1 ORDER BY COUNT(*) DESC`),
       query(`SELECT ehr_system     AS val, COUNT(*) FROM accounts ${BASE} GROUP BY 1 ORDER BY COUNT(*) DESC`),
@@ -105,6 +108,7 @@ export default async function handler(req, res) {
 
     // ── Build response ─────────────────────────────────────────────────────
     const total            = parseInt(totalRes.rows[0].count, 10);
+    const confirmedIcpCount = parseInt(confirmedIcpRes.rows[0].count, 10);
     const discoveryPlus    = parseInt(discoveryPlusRes.rows[0].count, 10);
     const closedWon        = parseInt(closedWonRes.rows[0].count, 10);
     const deployedRevenue  = parseFloat(deployedArrRes.rows[0].total) || 0;
@@ -125,7 +129,7 @@ export default async function handler(req, res) {
     const stats = {
       total,
       notRcmCount:       0, // not tracked in Postgres
-      confirmedIcpCount: total, // all db_status='main' accounts are ICP
+      confirmedIcpCount,
       roeCount,
       byStage:           toObj(stageRes.rows),
       byEhr:             toObj(ehrRes.rows),
