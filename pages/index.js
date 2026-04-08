@@ -2982,12 +2982,65 @@ function ActivityMetricCard({ emoji, label, value, target, loading, note }) {
   );
 }
 
-// ─── Activity Empty Table ─────────────────────────────────────────────────────
-function ActivityEmptyTable({ columns, label }) {
+// ─── Activity Detail Tables (live data) ──────────────────────────────────────
+
+function fmtTime(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function fmtDuration(secs) {
+  if (!secs) return '—';
+  const s = parseInt(secs, 10);
+  if (isNaN(s) || s <= 0) return '—';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${m}m ${r}s` : `${r}s`;
+}
+
+function OutcomeBadge({ outcome }) {
+  if (!outcome) return <span style={{ color: C.textMuted }}>—</span>;
+  const o = outcome.toLowerCase();
+  const isConn = o.includes('connect') || o.includes('answer') || o.includes('spoke');
+  const color = isConn ? C.green : C.textMuted;
+  return (
+    <span style={{ background: color + '22', color, borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      {outcome}
+    </span>
+  );
+}
+
+function StageBadge({ stage }) {
+  if (!stage) return <span style={{ color: C.textMuted }}>—</span>;
+  const colorMap = {
+    'Prospect': C.textMuted, 'Outreach': C.blue, 'Discovery': C.amber,
+    'SQL': C.purple, 'Negotiations': C.teal, 'Closed-Won': C.green,
+  };
+  const color = colorMap[stage] || C.blue;
+  return (
+    <span style={{ background: color + '22', color, borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      {stage}
+    </span>
+  );
+}
+
+function SfdcLink({ sfdc_id }) {
+  if (!sfdc_id) return <span style={{ color: C.textMuted }}>—</span>;
+  return (
+    <a href={`https://athelas.lightning.force.com/lightning/r/Task/${sfdc_id}/view`}
+       target="_blank" rel="noopener noreferrer"
+       style={{ color: C.blue, fontSize: 10 }}>↗</a>
+  );
+}
+
+function DetailTableShell({ label, columns, children, count }) {
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginTop: 8 }}>
-      <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, color: C.textSec, fontSize: 12, fontWeight: 600 }}>
-        {label}
+      <div style={{ padding: '8px 14px', borderBottom: `1px solid ${C.border}`, color: C.textSec, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>{label}</span>
+        {count != null && <span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11 }}>{count} row{count !== 1 ? 's' : ''}</span>}
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -2998,15 +3051,229 @@ function ActivityEmptyTable({ columns, label }) {
               ))}
             </tr>
           </thead>
-          <tbody>
-            <tr>
-              <td colSpan={columns.length} style={{ textAlign: 'center', padding: '32px 16px', color: C.textMuted, fontSize: 12 }}>
-                📭 No data yet — will populate once SFDC Task sync is active
-              </td>
-            </tr>
-          </tbody>
+          <tbody>{children}</tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function SkeletonRows({ cols, n = 3 }) {
+  return Array.from({ length: n }, (_, i) => (
+    <tr key={i}>
+      {Array.from({ length: cols }, (__, j) => (
+        <td key={j} style={{ padding: '8px 12px', borderBottom: `1px solid ${C.border}1a` }}>
+          <div style={{ height: 10, borderRadius: 4, background: C.border + '88', width: `${50 + Math.random() * 40}%` }} />
+        </td>
+      ))}
+    </tr>
+  ));
+}
+
+function EmptyRow({ cols, msg = 'No activity today yet' }) {
+  return (
+    <tr>
+      <td colSpan={cols} style={{ textAlign: 'center', padding: '20px 16px', color: C.textMuted, fontSize: 11 }}>
+        {msg}
+      </td>
+    </tr>
+  );
+}
+
+// Outbound Calls table
+function OutboundCallsTable() {
+  const { data, isLoading } = useSWR('/api/activities?window=today&type=call', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const rows = data?.activities || [];
+  const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
+  return (
+    <DetailTableShell label="📞 Outbound Calls" columns={cols} count={isLoading ? null : rows.length}>
+      {isLoading ? <SkeletonRows cols={7} /> : rows.length === 0 ? <EmptyRow cols={7} /> : rows.map(r => (
+        <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}1a` }}>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtTime(r.activity_date)}</td>
+          <td style={{ padding: '6px 12px', color: C.text }}>{r.rep || '—'}</td>
+          <td style={{ padding: '6px 12px' }}>
+            {r.account_sfdc_id
+              ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{r.account_name || r.account_sfdc_id}</a>
+              : <span style={{ color: C.textMuted }}>{r.account_name || '—'}</span>}
+          </td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.contact_name?.trim() || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtDuration(r.duration_seconds)}</td>
+          <td style={{ padding: '6px 12px' }}><OutcomeBadge outcome={r.outcome} /></td>
+          <td style={{ padding: '6px 12px' }}><SfdcLink sfdc_id={r.sfdc_id} /></td>
+        </tr>
+      ))}
+    </DetailTableShell>
+  );
+}
+
+// Live Connects table
+function LiveConnectsTable() {
+  const { data, isLoading } = useSWR('/api/activities?window=today&type=connects', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const rows = data?.activities || [];
+  const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
+  return (
+    <DetailTableShell label="🔗 Live Connects" columns={cols} count={isLoading ? null : rows.length}>
+      {isLoading ? <SkeletonRows cols={7} /> : rows.length === 0 ? <EmptyRow cols={7} /> : rows.map(r => (
+        <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}1a` }}>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtTime(r.activity_date)}</td>
+          <td style={{ padding: '6px 12px', color: C.text }}>{r.rep || '—'}</td>
+          <td style={{ padding: '6px 12px' }}>
+            {r.account_sfdc_id
+              ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{r.account_name || r.account_sfdc_id}</a>
+              : <span style={{ color: C.textMuted }}>{r.account_name || '—'}</span>}
+          </td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.contact_name?.trim() || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtDuration(r.duration_seconds)}</td>
+          <td style={{ padding: '6px 12px' }}><OutcomeBadge outcome={r.outcome} /></td>
+          <td style={{ padding: '6px 12px' }}><SfdcLink sfdc_id={r.sfdc_id} /></td>
+        </tr>
+      ))}
+    </DetailTableShell>
+  );
+}
+
+// Contacts Contacted table
+function ContactsContactedTable() {
+  const { data, isLoading } = useSWR('/api/activities?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const rows = data?.activities || [];
+
+  // Group by contact_sfdc_id (or contact_name if no sfdc_id)
+  const grouped = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const key = r.contact_sfdc_id || r.contact_name || 'unknown';
+      if (!map.has(key)) {
+        map.set(key, { contact_name: r.contact_name?.trim() || '—', account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, rep: r.rep || '—', types: new Set(), lastTouch: r.activity_date });
+      }
+      const g = map.get(key);
+      if (r.type) g.types.add(r.type);
+      if (r.activity_date > g.lastTouch) g.lastTouch = r.activity_date;
+    }
+    return Array.from(map.values()).sort((a, b) => b.lastTouch > a.lastTouch ? 1 : -1);
+  }, [rows]);
+
+  const typeEmoji = (t) => t === 'call' ? '📞' : t === 'email' ? '📧' : t === 'meeting' ? '📅' : t === 'task' ? '✅' : t;
+  const cols = ['Contact Name', 'Account', 'Rep', 'Activity Types Today', 'Last Touch'];
+  return (
+    <DetailTableShell label="👤 Contacts Contacted" columns={cols} count={isLoading ? null : grouped.length}>
+      {isLoading ? <SkeletonRows cols={5} /> : grouped.length === 0 ? <EmptyRow cols={5} /> : grouped.map((g, i) => (
+        <tr key={i} style={{ borderBottom: `1px solid ${C.border}1a` }}>
+          <td style={{ padding: '6px 12px', color: C.text }}>{g.contact_name}</td>
+          <td style={{ padding: '6px 12px' }}>
+            {g.account_sfdc_id
+              ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${g.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{g.account_name}</a>
+              : <span style={{ color: C.textSec }}>{g.account_name}</span>}
+          </td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{g.rep}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{[...g.types].map(typeEmoji).join(', ')}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtTime(g.lastTouch)}</td>
+        </tr>
+      ))}
+    </DetailTableShell>
+  );
+}
+
+// Accounts Contacted table
+function AccountsContactedTable() {
+  const { data, isLoading } = useSWR('/api/activities?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const rows = data?.activities || [];
+
+  const grouped = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const key = r.account_sfdc_id || r.account_name || 'unknown';
+      if (!map.has(key)) {
+        map.set(key, { account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, account_stage: r.account_stage, rep: r.rep || '—', touches: 0, types: new Set() });
+      }
+      const g = map.get(key);
+      g.touches++;
+      if (r.type) g.types.add(r.type);
+    }
+    return Array.from(map.values()).sort((a, b) => b.touches - a.touches);
+  }, [rows]);
+
+  const typeEmoji = (t) => t === 'call' ? '📞' : t === 'email' ? '📧' : t === 'meeting' ? '📅' : t === 'task' ? '✅' : t;
+  const cols = ['Account Name', 'Rep', '# Touches Today', 'Activity Types', 'Stage'];
+  return (
+    <DetailTableShell label="🏢 Accounts Contacted" columns={cols} count={isLoading ? null : grouped.length}>
+      {isLoading ? <SkeletonRows cols={5} /> : grouped.length === 0 ? <EmptyRow cols={5} /> : grouped.map((g, i) => (
+        <tr key={i} style={{ borderBottom: `1px solid ${C.border}1a` }}>
+          <td style={{ padding: '6px 12px' }}>
+            {g.account_sfdc_id
+              ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${g.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{g.account_name}</a>
+              : <span style={{ color: C.text }}>{g.account_name}</span>}
+          </td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{g.rep}</td>
+          <td style={{ padding: '6px 12px', textAlign: 'center', color: C.text, fontWeight: 600 }}>{g.touches}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{[...g.types].map(typeEmoji).join(', ')}</td>
+          <td style={{ padding: '6px 12px' }}><StageBadge stage={g.account_stage} /></td>
+        </tr>
+      ))}
+    </DetailTableShell>
+  );
+}
+
+// Sets table
+function SetsTable() {
+  const { data, isLoading } = useSWR('/api/activities?window=today&type=sets', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const rows = data?.activities || [];
+  const cols = ['Time', 'Account', 'Contact', 'Rep', 'Subject', 'SFDC'];
+  return (
+    <DetailTableShell label="📅 Sets (Disco Scheduled)" columns={cols} count={isLoading ? null : rows.length}>
+      {isLoading ? <SkeletonRows cols={6} /> : rows.length === 0 ? <EmptyRow cols={6} /> : rows.map(r => (
+        <tr key={r.id} style={{ borderBottom: `1px solid ${C.border}1a` }}>
+          <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtTime(r.activity_date)}</td>
+          <td style={{ padding: '6px 12px' }}>
+            {r.account_sfdc_id
+              ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{r.account_name || r.account_sfdc_id}</a>
+              : <span style={{ color: C.textSec }}>{r.account_name || '—'}</span>}
+          </td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.contact_name?.trim() || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.rep || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.subject || '—'}</td>
+          <td style={{ padding: '6px 12px' }}><SfdcLink sfdc_id={r.sfdc_id} /></td>
+        </tr>
+      ))}
+    </DetailTableShell>
+  );
+}
+
+// Sync Banner
+function ActivitySyncBanner({ onRefresh }) {
+  const { data: syncData } = useSWR('/api/sync-log', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  const activitiesSync = syncData?.lastSyncByTable?.find(s => s.table_name === 'activities');
+  const lastSyncedAt = activitiesSync?.completed_at ? new Date(activitiesSync.completed_at) : null;
+
+  function relTime(ts) {
+    if (!ts) return 'never';
+    const diffMs = now - ts.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
+      <span>🔄</span>
+      <span>Last synced: <strong style={{ color: C.textSec }}>{relTime(lastSyncedAt)}</strong></span>
+      <span style={{ color: C.border }}>·</span>
+      <span>Auto-refresh every 60s</span>
+      <span style={{ color: C.border }}>·</span>
+      <button
+        onClick={onRefresh}
+        style={{ background: 'none', border: 'none', color: C.blue, cursor: 'pointer', fontSize: 11, padding: 0, textDecoration: 'underline' }}>
+        Refresh now
+      </button>
     </div>
   );
 }
@@ -3189,11 +3456,15 @@ function ActivityDashboard() {
 
       {/* ── Section 2 — Daily Activity Detail ── */}
       <DashSection title="📋 Daily Activity Detail" accent={C.purple} defaultOpen={false}>
-        <ActivityEmptyTable label="📞 Outbound Calls" columns={['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link']} />
-        <ActivityEmptyTable label="🔗 Live Connects"  columns={['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link']} />
-        <ActivityEmptyTable label="👤 Contacts Contacted" columns={['Contact Name', 'Account', 'Rep', 'Activity Types Today', 'Last Touch']} />
-        <ActivityEmptyTable label="🏢 Accounts Contacted" columns={['Account Name', 'Rep', '# Touches Today', 'Activity Types', 'Stage']} />
-        <ActivityEmptyTable label="📅 Sets (Disco Scheduled)" columns={['Time', 'Account', 'Contact', 'Rep', 'Meeting Date', 'Subject', 'SFDC']} />
+        <ActivitySyncBanner onRefresh={() => {
+          // Trigger SWR revalidation by mutating cache keys
+          if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();
+        }} />
+        <OutboundCallsTable />
+        <LiveConnectsTable />
+        <ContactsContactedTable />
+        <AccountsContactedTable />
+        <SetsTable />
       </DashSection>
 
       {/* ── Section 3 — This Week's Stats ── */}

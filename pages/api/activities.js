@@ -1,0 +1,91 @@
+/**
+ * /api/activities — GET
+ *
+ * Returns raw activity records for the Daily Activity Detail tables.
+ *
+ * Query params:
+ *   window   "today" — filter to CURRENT_DATE
+ *   date     ISO date string or "today"
+ *   type     "call" | "connects" | "sets" | "all"
+ *   limit    max rows (default 200)
+ *
+ * Response: { activities: [...], count: number }
+ */
+
+import { query } from '../../lib/db';
+
+function cors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+export default async function handler(req, res) {
+  cors(res);
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+  const { date, type, window: win, limit = 200 } = req.query;
+
+  let dateFilter = '';
+  const params = [];
+
+  if (win === 'today' || date === 'today') {
+    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'UTC') = CURRENT_DATE`;
+  } else if (date) {
+    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'UTC') = $1`;
+    params.push(date);
+  }
+
+  let typeFilter = '';
+  let extraFilter = '';
+
+  if (type === 'sets') {
+    typeFilter = '';
+    extraFilter = `AND (a.type = 'meeting' OR LOWER(a.subject) LIKE '%disco%' OR LOWER(a.subject) LIKE '%discovery%' OR LOWER(a.subject) LIKE '%set%')`;
+  } else if (type === 'connects') {
+    typeFilter = `AND a.type = 'call'`;
+    extraFilter = `AND (LOWER(a.outcome) LIKE '%connect%' OR LOWER(a.outcome) LIKE '%answer%' OR LOWER(a.outcome) LIKE '%spoke%')`;
+  } else if (type && type !== 'all') {
+    typeFilter = `AND a.type = $${params.length + 1}`;
+    params.push(type);
+  }
+
+  const limitInt = Math.min(parseInt(limit) || 200, 500);
+
+  const sql = `
+    SELECT
+      a.id,
+      a.sfdc_id,
+      a.type,
+      a.subject,
+      a.activity_date,
+      a.outcome,
+      a.rep,
+      a.duration_seconds,
+      a.source_system,
+      a.notes,
+      a.account_sfdc_id,
+      a.contact_sfdc_id,
+      acc.name AS account_name,
+      acc.agents_stage AS account_stage,
+      CONCAT(c.first_name, ' ', c.last_name) AS contact_name
+    FROM activities a
+    LEFT JOIN accounts acc ON acc.sfdc_id = a.account_sfdc_id
+    LEFT JOIN contacts c ON c.sfdc_id = a.contact_sfdc_id
+    WHERE 1=1
+      ${dateFilter}
+      ${typeFilter}
+      ${extraFilter}
+    ORDER BY a.activity_date DESC
+    LIMIT ${limitInt}
+  `;
+
+  try {
+    const result = await query(sql, params);
+    return res.status(200).json({ activities: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[activities]', err.message);
+    return res.status(500).json({ error: err.message, activities: [], count: 0 });
+  }
+}
