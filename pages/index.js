@@ -329,6 +329,34 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
   const isLoading = statsLoading || !globals?.goals;
   const goals = globals?.goals;
 
+  // Collapsible per-goal account lists
+  const [expandedGoal, setExpandedGoal] = useState(null);
+  const GOAL_STAGES = {
+    goal1: ['Discovery','SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment'],
+    goal2: ['Closed-Won','Pilot Deployment','Full Deployment'],
+    goal3: ['Closed-Won','Pilot Deployment','Full Deployment'],
+  };
+
+  const goalAccountUrl = (key) => {
+    const stages = GOAL_STAGES[key] || [];
+    return `/api/pipeline?stage=${encodeURIComponent(stages.join(','))}&pageSize=100&page=1`;
+  };
+
+  const { data: goal1Accounts } = useSWR(
+    expandedGoal === 'goal1' ? goalAccountUrl('goal1') : null, fetcher,
+    { revalidateOnFocus: false }
+  );
+  const { data: goal2Accounts } = useSWR(
+    expandedGoal === 'goal2' ? goalAccountUrl('goal2') : null, fetcher,
+    { revalidateOnFocus: false }
+  );
+  const { data: goal3Accounts } = useSWR(
+    expandedGoal === 'goal3' ? goalAccountUrl('goal3') : null, fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  const goalDataMap = { goal1: goal1Accounts, goal2: goal2Accounts, goal3: goal3Accounts };
+
   if (isLoading) {
     return (
       <Section id="goals" title="🎯 Goals & Progress" accent={SECTION_ACCENT.goals} subtitle="Loading…">
@@ -347,16 +375,90 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
   const t2 = goals.goal2Target || 7;
   const t3 = goals.goal3Target || 300_000;
 
-  function GoalRow({ label, current, target, color, format = 'number' }) {
+  function CollapsibleAccountTable({ goalKey }) {
+    const isExpanded = expandedGoal === goalKey;
+    const accountData = goalDataMap[goalKey];
+    const records = accountData?.records || [];
+    const loading = isExpanded && !accountData;
+
+    const thS = {
+      padding: '6px 10px', textAlign: 'left', color: C.textMuted,
+      fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`,
+      textTransform: 'uppercase', letterSpacing: '0.3px', whiteSpace: 'nowrap',
+      background: C.surface,
+    };
+    const tdS = { padding: '6px 10px', fontSize: 12, borderBottom: `1px solid ${C.border}1a`, color: C.textSec };
+
+    if (!isExpanded) return null;
+    return (
+      <div style={{ marginTop: 10, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        {loading ? (
+          <div style={{ padding: '16px 18px', color: C.textMuted, fontSize: 12 }}>⟳ Loading accounts…</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={thS}>Account Name</th>
+                  <th style={thS}>Stage</th>
+                  <th style={{ ...thS, textAlign: 'right' }}>ACV</th>
+                  <th style={thS}>Owner</th>
+                  <th style={{ ...thS, textAlign: 'center' }}>SFDC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.length === 0 ? (
+                  <tr><td colSpan={5} style={{ ...tdS, textAlign: 'center', padding: '16px 10px', color: C.textMuted }}>No accounts found</td></tr>
+                ) : records.map((rec, i) => {
+                  const f = rec.fields || rec;
+                  const name = f['Account Name'] || f.account_name || '—';
+                  const stage = f['Stage'] || f.stage || '—';
+                  const acv = f['Annual Revenue ($)'] || f['ACV'] || null;
+                  const owner = f['Owner'] || f['Account Owner'] || f.owner || '—';
+                  const sfdcId = f['SFDC Account ID'] || f['sfdc_id'] || null;
+                  const sfdcUrl = sfdcId ? `https://athelas.lightning.force.com/lightning/r/Account/${sfdcId}/view` : null;
+                  return (
+                    <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : C.card + '44' }}>
+                      <td style={{ ...tdS, color: C.textPri, fontWeight: 500 }}>{name}</td>
+                      <td style={tdS}>
+                        <span style={{ background: (STAGE_COLORS[stage] || '#334155') + '33', color: STAGE_TEXT_COLORS[stage] || C.textSec, border: `1px solid ${(STAGE_COLORS[stage] || '#334155')}66`, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>{stage}</span>
+                      </td>
+                      <td style={{ ...tdS, textAlign: 'right' }}>{acv ? fmt(acv, 'currency') : '—'}</td>
+                      <td style={tdS}>{owner}</td>
+                      <td style={{ ...tdS, textAlign: 'center' }}>
+                        {sfdcUrl
+                          ? <a href={sfdcUrl} target="_blank" rel="noopener noreferrer" style={{ color: C.blue, fontSize: 14, textDecoration: 'none' }} title="Open in Salesforce">🔗</a>
+                          : <span style={{ color: C.textMuted }}>—</span>
+                        }
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function GoalRow({ goalKey, label, current, target, color, format = 'number' }) {
     const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
     const toGo = Math.max(0, target - current);
     const displayValue  = format === 'currency' ? fmt(current, 'currency') : current;
     const displayTarget = format === 'currency' ? fmt(target, 'currency') : target;
     const toGoDisplay   = format === 'currency' ? fmt(toGo, 'currency') : toGo;
+    const isExpanded = expandedGoal === goalKey;
     return (
       <div style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span style={{ color: C.textPri, fontSize: 13, fontWeight: 600 }}>{label}</span>
+        <div
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, cursor: 'pointer' }}
+          onClick={() => setExpandedGoal(isExpanded ? null : goalKey)}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: C.textPri, fontSize: 13, fontWeight: 600 }}>{label}</span>
+            <span style={{ color: C.textMuted, fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>▾</span>
+          </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <span style={{ color, fontWeight: 700, fontSize: 15 }}>{displayValue}<span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12 }}>/{displayTarget}</span></span>
             <SelectBadge value={`${pct}%`} color={color} />
@@ -367,6 +469,7 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
           </div>
         </div>
         <ProgressBar value={current} max={target} color={color} height={10} />
+        <CollapsibleAccountTable goalKey={goalKey} />
       </div>
     );
   }
@@ -375,14 +478,17 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
     <Section id="goals" title="🎯 Goals & Progress" accent={SECTION_ACCENT.goals}
       subtitle="Target: July 31, 2026 · Cumulative from inception">
       <GoalRow
+        goalKey="goal1"
         label="Accounts moved to Discovery stage or beyond (cumulative)"
         current={g1} target={t1} color={C.purple}
       />
       <GoalRow
+        goalKey="goal2"
         label="Closed-Won accounts (incl. Pilot &amp; Full Deployment)"
         current={g2} target={t2} color={C.green}
       />
       <GoalRow
+        goalKey="goal3"
         label="Deployed ARR"
         current={g3} target={t3} color={C.amber} format="currency"
       />
@@ -391,11 +497,11 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
 }
 
 // ─── Section 2: Market Summary ────────────────────────────────────────────────
-function MarketSummarySection({ globals, statsLoading }) {
+function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summary', hiddenLabels = [] }) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   if (statsLoading || !globals?.stats) {
     return (
-      <Section id="market" title="📊 Market Summary" accent={SECTION_ACCENT.market} defaultOpen={true}>
+      <Section id="market" title={title} accent={SECTION_ACCENT.market} defaultOpen={true}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {[1,2,3,4,5].map(i => (
             <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 16px', flex: '1 1 140px', minWidth: 120 }}>
@@ -409,16 +515,17 @@ function MarketSummarySection({ globals, statsLoading }) {
   }
   const { stats } = globals;
 
-  const statCards = [
+  const allStatCards = [
     { label: 'Total in Pipeline',    value: fmt(stats.total),                       color: C.blue    },
     { label: 'Est. TAM Value',       value: fmt(stats.total * 150_000, 'currency'), color: C.green,  sub: '@ $150K avg ACV' },
     { label: 'Non-RCM ICP',          value: fmt(stats.notRcmCount),                 color: C.amber   },
     { label: 'Confirmed ICP Tier',   value: fmt(stats.confirmedIcpCount),            color: C.purple  },
     { label: 'Deployed ARR',         value: '$650K',                                 color: C.green,  sub: 'Nathan Littauer $575K + Medvanta $75K' },
   ];
+  const statCards = allStatCards.filter(({ label }) => !hiddenLabels.includes(label));
 
   return (
-    <Section id="market" title="📊 Market Summary" accent={SECTION_ACCENT.market} defaultOpen={true}>
+    <Section id="market" title={title} accent={SECTION_ACCENT.market} defaultOpen={true}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         {statCards.map(({ label, value, color, sub }) => (
           <div key={label} style={{
@@ -1233,12 +1340,15 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
   );
 }
 
-// ─── Section 4: Activity ──────────────────────────────────────────────────────
+// ─── Section 4: Account and Contact Changes ───────────────────────────────────
 // Change 10: replaced WoW/MoM stage transitions with 4-metric × 4-period tables
 function ActivitySection() {
-  const [subTab, setSubTab] = useState('activity');
-
   const { data, error, isLoading } = useSWR('/api/activity', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 5 * 60 * 1000,
+  });
+
+  const { data: contactsData } = useSWR('/api/contacts-activity', fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 5 * 60 * 1000,
   });
@@ -1272,15 +1382,51 @@ function ActivitySection() {
 
   const buildRows = (periods) => {
     const items = data?.activity || [];
-    return ACTIVITY_METRICS.map((metric) => {
+    const rows = ACTIVITY_METRICS.map((metric) => {
       const counts = periods.map(({ start, end }) => countInPeriod(items, metric.stages, start, end));
       const delta = counts[3] - counts[2];
       return { ...metric, counts, delta };
     });
+    // Add Contacts Added row from contacts-activity API
+    const contactsCounts = contactsData
+      ? periods.map((p, i) => {
+          const src = p === weeks[0] || p === weeks[1] || p === weeks[2] || p === weeks[3]
+            ? contactsData.weeks
+            : contactsData.months;
+          return null; // resolved below
+        })
+      : null;
+    return rows;
   };
 
-  const wowRows = data ? buildRows(weeks)  : null;
-  const momRows = data ? buildRows(months) : null;
+  const buildRowsWithContacts = (periods, isWeek) => {
+    const items = data?.activity || [];
+    const rows = ACTIVITY_METRICS.map((metric) => {
+      const counts = periods.map(({ start, end }) => countInPeriod(items, metric.stages, start, end));
+      const delta = counts[3] - counts[2];
+      return { ...metric, counts, delta };
+    });
+    // Add Contacts Added row
+    const contactPeriods = isWeek ? contactsData?.weeks : contactsData?.months;
+    const contactCounts = contactPeriods
+      ? periods.map((_, i) => contactPeriods[i]?.count ?? null)
+      : periods.map(() => null);
+    const contactDelta = contactCounts[3] != null && contactCounts[2] != null
+      ? contactCounts[3] - contactCounts[2]
+      : 0;
+    rows.push({
+      label: 'Contacts Added',
+      desc: 'New contacts created',
+      stages: [],
+      counts: contactCounts.map((c) => c ?? 0),
+      delta: contactDelta,
+      nullCounts: contactPeriods == null,
+    });
+    return rows;
+  };
+
+  const wowRows = data ? buildRowsWithContacts(weeks, true)  : null;
+  const momRows = data ? buildRowsWithContacts(months, false) : null;
 
   const thS = {
     padding: '6px 10px', textAlign: 'center', color: C.textMuted,
@@ -1336,51 +1482,19 @@ function ActivitySection() {
     </div>
   );
 
-  const subTabBtn = (id, label) => (
-    <button key={id} onClick={() => setSubTab(id)} style={{
-      background: subTab === id ? C.amber + '22' : 'transparent',
-      color: subTab === id ? C.amber : C.textSec,
-      border: `1px solid ${subTab === id ? C.amber + '55' : 'transparent'}`,
-      borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: 12,
-      fontWeight: subTab === id ? 600 : 400,
-    }}>{label}</button>
-  );
-
   return (
-    <Section id="activity" title="⚡ Activity" accent={SECTION_ACCENT.activity}>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
-        {subTabBtn('activity', '📊 Activity Metrics')}
-        {subTabBtn('outreach', '📬 Outreach & Contact Activity')}
-      </div>
-
-      {subTab === 'outreach' && (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '20px 18px' }}>
-          <div style={{ color: C.textSec, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Coming Soon</div>
-          <p style={{ color: C.textMuted, fontSize: 12, margin: '0 0 12px 0' }}>
-            Will show emails, calls, LinkedIn activity from Outreach.io + SFDC once webhooks are connected.
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <SelectBadge value="Webhook ready: /api/webhook/sfdc" color={C.green} />
-            <SelectBadge value="Webhook ready: /api/webhook/outreach" color={C.green} />
-          </div>
-        </div>
+    <Section id="activity" title="🔄 Account and Contact Changes" accent={SECTION_ACCENT.activity}>
+      {isLoading && !data && (
+        <div style={{ color: C.textMuted, textAlign: 'center', padding: '30px 0', fontSize: 13 }}>⟳ Loading activity…</div>
       )}
-
-      {subTab === 'activity' && (
-        <>
-          {isLoading && !data && (
-            <div style={{ color: C.textMuted, textAlign: 'center', padding: '30px 0', fontSize: 13 }}>⟳ Loading activity…</div>
-          )}
-          {error && (
-            <div style={{ color: C.red, fontSize: 13, marginBottom: 12 }}>⚠ Failed to load activity data.</div>
-          )}
-          {data && wowRows && momRows && (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <MetricTable title="Week over Week (ISO weeks)" periods={weeks} rows={wowRows} />
-              <MetricTable title="Month over Month" periods={months} rows={momRows} />
-            </div>
-          )}
-        </>
+      {error && (
+        <div style={{ color: C.red, fontSize: 13, marginBottom: 12 }}>⚠ Failed to load activity data.</div>
+      )}
+      {data && wowRows && momRows && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <MetricTable title="Week over Week (ISO weeks)" periods={weeks} rows={wowRows} />
+          <MetricTable title="Month over Month" periods={months} rows={momRows} />
+        </div>
       )}
     </Section>
   );
@@ -1680,7 +1794,7 @@ function CrosstabMatrix({ rowDim, colDim }) {
   );
 }
 
-function MarketOverviewSection({ globals }) {
+function MarketOverviewSection({ globals, title = '🌍 Addressable Market Overview' }) {
   const [rowDim, setRowDim] = useState('EHR');
   const [colDim, setColDim] = useState('Stage');
 
@@ -1731,7 +1845,7 @@ function MarketOverviewSection({ globals }) {
   const isChartSelected = (dim, name) => chartFilter.dim === dim && chartFilter.value === name;
 
   return (
-    <Section id="overview" title="🌍 Addressable Market Overview" accent={SECTION_ACCENT.overview}>
+    <Section id="overview" title={title} accent={SECTION_ACCENT.overview}>
       {/* Header stat */}
       <div style={{ marginBottom: 8 }}>
         <span style={{ color: C.teal, fontWeight: 700, fontSize: 18 }}>{total.toLocaleString()}</span>
@@ -3646,6 +3760,7 @@ export default function Home() {
               border: `1px solid ${C.border}`, borderRadius: 10, padding: 4,
             }}>
               {tabBtn('pipeline', '📊 Dashboard')}
+              {tabBtn('icpdetail', '📋 ICP Accounts Detail')}
               {tabBtn('accounts', '🏢 Accounts')}
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('opportunities', '💼 Opportunities')}
@@ -3702,7 +3817,6 @@ export default function Home() {
             {dashSection === 'pipeline' && (
               <>
                 <GoalsSection globals={globals} currentMonth={currentMonth} statsLoading={statsLoading} />
-                <MarketSummarySection globals={globals} statsLoading={statsLoading} />
                 <PipelineSection
                   schema={schema}
                   pipelineData={pipelineData}
@@ -3714,9 +3828,21 @@ export default function Home() {
                   setPage={setPage}
                 />
                 <ActivitySection />
-                <MarketOverviewSection globals={globals} />
               </>
             )}
+          </>
+        )}
+
+        {/* ── ICP Accounts Detail Tab ── */}
+        {activeTab === 'icpdetail' && (
+          <>
+            <MarketSummarySection
+              globals={globals}
+              statsLoading={statsLoading}
+              title="📊 Total ICP Accounts"
+              hiddenLabels={['Non-RCM ICP', 'Confirmed ICP Tier']}
+            />
+            <MarketOverviewSection globals={globals} title="🌍 ICP Account List - Detailed View" />
           </>
         )}
 
