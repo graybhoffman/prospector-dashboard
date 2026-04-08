@@ -19,6 +19,48 @@ import path from 'path';
 
 const JSON_PATH = path.join(process.cwd(), 'data', 'pipeline_opps.json');
 
+const STAGE_MAP = {
+  // Prospect
+  'prospect': 'Prospect',
+  // Outreach
+  'outreach': 'Outreach',
+  'iqm set': 'Outreach',
+  'fha': 'Outreach',
+  '1. qualifying': 'Outreach',
+  // Discovery
+  'discovery': 'Discovery',
+  'active evaluation': 'Discovery',
+  '2. needs analysis': 'Discovery',
+  // SQL
+  'sql': 'SQL',
+  '3. scoping': 'SQL',
+  // Negotiations
+  'negotiations': 'Negotiations',
+  '4. proposal/price quote': 'Negotiations',
+  '5. negotiate/contract sent': 'Negotiations',
+  '6. contract red-line received': 'Negotiations',
+  '7. final contract execution': 'Negotiations',
+  'contract negotiation': 'Negotiations',
+  // Pilot Deployment
+  'pilot': 'Pilot Deployment',
+  'pilot deployment': 'Pilot Deployment',
+  // Full Deployment
+  'full deployment': 'Full Deployment',
+  // Closed-Won
+  'closed won': 'Closed-Won',
+  '8. close won': 'Closed-Won',
+  'closed won - live': 'Closed-Won',
+  'contract signed/closed won': 'Closed-Won',
+  // Closed-Lost
+  'closed lost': 'Closed-Lost',
+  '9. lost/nurture': 'Closed-Lost',
+};
+
+function normalizeStage(raw) {
+  if (!raw) return null;
+  return STAGE_MAP[raw.toLowerCase().trim()] || raw;
+}
+
 let cache = null;
 let cacheLoadedAt = 0;
 const CACHE_TTL = 60 * 60 * 1000;
@@ -34,8 +76,8 @@ function loadOpps() {
       sfdcUrl:        r['SFDC URL'] || '',
       accountName:    r['Account Name'] || '',
       accountId:      r['Account ID'] || '',
-      stage:          r['Stage (Raw)'] || r['Stage Bucket'] || '',
-      stageBucket:    r['Stage Bucket'] || '',
+      stage:          normalizeStage(r['Stage (Raw)'] || r['Stage Bucket'] || ''),
+      stageBucket:    normalizeStage(r['Stage Bucket'] || r['Stage (Raw)'] || ''),
       ehr:            r['EHR (Normalized)'] || r['EHR (Raw)'] || '',
       acv:            parseFloat(r['ACV / Amount ($)']) || null,
       closeDate:      r['Close Date'] || '',

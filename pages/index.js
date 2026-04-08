@@ -1184,7 +1184,7 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
       {/* Loading */}
       {isLoading && !pipelineData && (
         <div style={{ textAlign: 'center', padding: '50px 0', color: C.textMuted }}>
-          <div style={{ fontSize: 14, marginBottom: 8 }}>⟳ Loading pipeline from Notion…</div>
+          <div style={{ fontSize: 14, marginBottom: 8 }}>⟳ Loading pipeline…</div>
           <div style={{ fontSize: 12 }}>Large databases may take a few minutes on first load.</div>
         </div>
       )}
@@ -2137,7 +2137,7 @@ function DataSection() {
 
     function RoeBadge({ issues }) {
       if (!issues || issues.length === 0) return <span style={S.muted}>—</span>;
-      const hasRed = issues.some(i => i.toLowerCase().includes('hard') || i.toLowerCase().includes('block'));
+      const hasRed = issues.some(i => i.toLowerCase().includes('closed-won') || i.toLowerCase().includes('closed won'));
       return (
         <span title={issues.join(', ')} style={{
           background: hasRed ? '#ef444422' : '#f59e0b22',

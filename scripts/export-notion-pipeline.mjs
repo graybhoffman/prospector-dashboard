@@ -65,7 +65,9 @@ function mapRecord(item) {
     estMonthlyCallVolume: f['Est. Monthly Call Volume'] ?? null,
     specialty:            f['Specialty'] || '',
     aiRationale:          f['AI Rationale'] || '',
-    potentialRoeIssue:    Array.isArray(f['Potential ROE Issue']) ? f['Potential ROE Issue'] : [],
+    potentialRoeIssue:    f['Potential ROE Issue']
+                            ? (Array.isArray(f['Potential ROE Issue']) ? f['Potential ROE Issue'] : [f['Potential ROE Issue']])
+                            : [],
     roeFlagNotes:         f['ROE Flag Notes'] || '',
     netNewAccount:        f['Net New Account'] || false,
     notInRcmIcp:          f['Not in RCM ICP'] || false,
