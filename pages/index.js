@@ -3753,101 +3753,73 @@ function getWeekRange() {
 }
 
 // ─── Activity Trend Charts ────────────────────────────────────────────────────
-function ActivityTrendCharts() {
-  const [callsWindow, setCallsWindow] = useState('daily');
-  const [coverageWindow, setCoverageWindow] = useState('daily');
-  const [setsWindow, setSetsWindow] = useState('daily');
-
-  // Build placeholder trend data
-  const buildPlaceholder = (n, base, variance) =>
-    Array.from({ length: n }, (_, i) => ({
-      label: `P${i + 1}`,
-      calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0,
-    }));
-
-  const dailyData  = buildPlaceholder(14, 0, 0).map((d, i) => {
-    const date = new Date(); date.setDate(date.getDate() - (13 - i));
-    return { ...d, label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
+// Collapsible sub-section within Trends — for Daily / Weekly / Monthly
+function TrendSubSection({ title, storageKey, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) return saved === 'true';
+    }
+    return defaultOpen;
   });
-  const weeklyData = buildPlaceholder(4, 0, 0).map((d, i) => {
-    const date = new Date(); date.setDate(date.getDate() - (3 - i) * 7);
-    const mon = new Date(date); mon.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-    return { ...d, label: `Wk ${mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` };
-  });
-  const monthlyData = buildPlaceholder(4, 0, 0).map((d, i) => {
-    const date = new Date(); date.setMonth(date.getMonth() - (3 - i));
-    return { ...d, label: date.toLocaleDateString('en-US', { month: 'short' }) };
-  });
-
-  const getWindowData = (w) => w === 'daily' ? dailyData : w === 'weekly' ? weeklyData : monthlyData;
-  const callsTarget = callsWindow === 'daily' ? 40 : callsWindow === 'weekly' ? 200 : 880;
-  const connectsTarget = callsWindow === 'daily' ? 4 : callsWindow === 'weekly' ? 20 : 88;
-  const setsTarget = setsWindow === 'daily' ? 1 : setsWindow === 'weekly' ? 5 : 22;
-
-  const windowBtns = (current, setCurrent) => ['daily', 'weekly', 'monthly'].map(w => (
-    <button key={w} onClick={() => setCurrent(w)} style={{
-      background: current === w ? C.accent + '33' : 'transparent',
-      color: current === w ? C.accent : C.textMuted,
-      border: `1px solid ${current === w ? C.accent + '55' : 'transparent'}`,
-      borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 11,
-      fontWeight: current === w ? 600 : 400, textTransform: 'capitalize',
-    }}>{w.charAt(0).toUpperCase() + w.slice(1)}</button>
-  ));
-
-  const CHART_H = 180;
-  const chartStyle = {
-    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px',
-    flex: '1 1 300px', minWidth: 280,
-  };
-
-  const emptyNote = (
-    <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', marginTop: 8 }}>
-      📊 Charts will populate once SFDC Task sync is active
+  function toggle() {
+    setOpen(o => {
+      const next = !o;
+      if (typeof window !== 'undefined') localStorage.setItem(storageKey, String(next));
+      return next;
+    });
+  }
+  return (
+    <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden', marginBottom: 10 }}>
+      <button onClick={toggle} style={{
+        width: '100%', background: C.surface, border: 'none', padding: '9px 14px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        cursor: 'pointer', borderBottom: open ? `1px solid ${C.border}` : 'none',
+      }}>
+        <span style={{ color: C.textSec, fontWeight: 600, fontSize: 13 }}>{title}</span>
+        <span style={{ color: C.textMuted, fontSize: 11, transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▼</span>
+      </button>
+      {open && <div style={{ padding: '12px 14px' }}>{children}</div>}
     </div>
   );
+}
+
+function TrendChartSet({ data, callsTarget, connectsTarget, setsTarget }) {
+  const CHART_H = 160;
+  const emptyNote = data.every(d => !d.calls && !d.connects && !d.sets) ? (
+    <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', marginTop: 6 }}>
+      📊 Data will populate once SFDC Task sync is active
+    </div>
+  ) : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Chart 1 — Calls & Connects */}
-      <div style={chartStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>📞 Calls &amp; Connects</span>
-          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(callsWindow, setCallsWindow)}</div>
-        </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
-          <span style={{ color: C.blue }}>■ Outbound Calls</span>
-          <span style={{ color: C.amber }}>— Live Connects</span>
-          <span style={{ color: C.textMuted, borderTop: '1px dashed', paddingTop: 1 }}>- - - Target ({callsTarget}/pd)</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Calls & Connects */}
+      <div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 6 }}>
+          <span style={{ color: C.blue }}>■ Outbound Calls (target: {callsTarget})</span>
+          <span style={{ color: C.amber }}>■ Live Connects (target: {connectsTarget})</span>
         </div>
         <ResponsiveContainer width="100%" height={CHART_H}>
-          <BarChart data={getWindowData(callsWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+          <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
             <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }}
-              labelStyle={{ color: C.textSec }}
-              itemStyle={{ color: C.textPri }}
-            />
+            <Tooltip contentStyle={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: C.textSec }} itemStyle={{ color: C.textPri }} />
             <Bar dataKey="calls" fill={C.blue} radius={[3, 3, 0, 0]} name="Calls" />
             <Bar dataKey="connects" fill={C.amber} radius={[3, 3, 0, 0]} name="Connects" />
           </BarChart>
         </ResponsiveContainer>
         {emptyNote}
       </div>
-
-      {/* Chart 2 — Outreach Coverage */}
-      <div style={chartStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>🎯 Outreach Coverage</span>
-          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(coverageWindow, setCoverageWindow)}</div>
-        </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+      {/* Coverage */}
+      <div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 6 }}>
           <span style={{ color: C.teal }}>■ Contacts Reached</span>
           <span style={{ color: C.purple }}>■ Accounts Contacted</span>
         </div>
         <ResponsiveContainer width="100%" height={CHART_H}>
-          <BarChart data={getWindowData(coverageWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+          <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
             <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -3856,21 +3828,14 @@ function ActivityTrendCharts() {
             <Bar dataKey="accounts" fill={C.purple} radius={[3, 3, 0, 0]} name="Accounts" />
           </BarChart>
         </ResponsiveContainer>
-        {emptyNote}
       </div>
-
-      {/* Chart 3 — Sets */}
-      <div style={chartStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ color: C.textSec, fontSize: 12, fontWeight: 600 }}>📅 Discovery Sets</span>
-          <div style={{ display: 'flex', gap: 4 }}>{windowBtns(setsWindow, setSetsWindow)}</div>
-        </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
-          <span style={{ color: C.green }}>■ Sets (Disco Scheduled)</span>
-          <span style={{ color: C.textMuted }}>- - - Target ({setsTarget}/pd)</span>
+      {/* Sets */}
+      <div>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.textMuted, marginBottom: 6 }}>
+          <span style={{ color: C.green }}>■ Discovery Sets (target: {setsTarget}/pd)</span>
         </div>
         <ResponsiveContainer width="100%" height={CHART_H}>
-          <BarChart data={getWindowData(setsWindow)} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+          <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
             <XAxis dataKey="label" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -3878,8 +3843,38 @@ function ActivityTrendCharts() {
             <Bar dataKey="sets" fill={C.green} radius={[3, 3, 0, 0]} name="Sets" />
           </BarChart>
         </ResponsiveContainer>
-        {emptyNote}
       </div>
+    </div>
+  );
+}
+
+function ActivityTrendCharts() {
+  // Build placeholder trend data (zeros until SFDC sync is active)
+  const dailyData  = Array.from({ length: 14 }, (_, i) => {
+    const date = new Date(); date.setDate(date.getDate() - (13 - i));
+    return { label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
+  });
+  const weeklyData = Array.from({ length: 8 }, (_, i) => {
+    const date = new Date(); date.setDate(date.getDate() - (7 - i) * 7);
+    const mon = new Date(date); mon.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+    return { label: `Wk ${mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
+  });
+  const monthlyData = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date(); date.setMonth(date.getMonth() - (5 - i));
+    return { label: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
+  });
+
+  return (
+    <div>
+      <TrendSubSection title="📅 Daily (Last 14 days)" storageKey="wt_trends_daily" defaultOpen={true}>
+        <TrendChartSet data={dailyData} callsTarget={40} connectsTarget={4} setsTarget={1} />
+      </TrendSubSection>
+      <TrendSubSection title="📆 Weekly (Last 8 weeks)" storageKey="wt_trends_weekly" defaultOpen={false}>
+        <TrendChartSet data={weeklyData} callsTarget={200} connectsTarget={20} setsTarget={5} />
+      </TrendSubSection>
+      <TrendSubSection title="🗓️ Monthly (Last 6 months)" storageKey="wt_trends_monthly" defaultOpen={false}>
+        <TrendChartSet data={monthlyData} callsTarget={880} connectsTarget={88} setsTarget={22} />
+      </TrendSubSection>
     </div>
   );
 }
