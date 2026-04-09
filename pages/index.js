@@ -5144,6 +5144,222 @@ function SyncLogDataTab() {
   );
 }
 
+// ─── References Tab ──────────────────────────────────────────────────────────
+function ReferencesTab() {
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState(null);
+  const [resolvedState, setResolvedState] = useState(null);
+  const inputRef = useRef(null);
+
+  async function handleSearch(e) {
+    e?.preventDefault();
+    const raw = query.trim();
+    if (!raw) return;
+    setLoading(true);
+    setError(null);
+    setResults(null);
+
+    try {
+      // Parse "city, state" or "state" from the input
+      let state = raw;
+      let city = '';
+      const commaIdx = raw.indexOf(',');
+      if (commaIdx !== -1) {
+        city  = raw.slice(0, commaIdx).trim();
+        state = raw.slice(commaIdx + 1).trim();
+      }
+      const params = new URLSearchParams({ state });
+      if (city) params.set('city', city);
+      const resp = await fetch(`/api/local-references?${params}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Request failed');
+      setResults(data.results || []);
+      setResolvedState(data.stateCode || state);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function fmtAmount(n) {
+    if (!n) return '—';
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+    return `$${n.toLocaleString()}`;
+  }
+
+  function fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+  }
+
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto', padding: '12px 0' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 24 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px' }}>
+          📍 Local References
+        </h2>
+        <p style={{ margin: '6px 0 0', color: C.textSec, fontSize: 13, lineHeight: 1.5 }}>
+          Find nearby Commure <strong style={{ color: C.green }}>Closed Won</strong> accounts to name-drop when calling prospects in a given region.
+        </p>
+      </div>
+
+      {/* Search form */}
+      <form onSubmit={handleSearch} style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder='City or State — e.g. "Baton Rouge, LA" · "Ohio" · "upstate NY"'
+          style={{
+            flex: 1, background: C.card, border: `1px solid ${C.border}`,
+            borderRadius: 8, padding: '10px 14px', color: C.textPri,
+            fontSize: 14, outline: 'none',
+          }}
+        />
+        <button
+          type="submit"
+          disabled={loading || !query.trim()}
+          style={{
+            background: loading ? C.border : C.accent,
+            color: '#fff', border: 'none', borderRadius: 8,
+            padding: '10px 22px', cursor: loading ? 'default' : 'pointer',
+            fontWeight: 600, fontSize: 13, transition: 'background 0.15s',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {loading ? '🔍 Searching…' : '🔍 Find References'}
+        </button>
+      </form>
+
+      {/* Error */}
+      {error && (
+        <div style={{
+          background: C.red + '18', border: `1px solid ${C.red}44`,
+          borderRadius: 10, padding: '12px 16px', color: C.red, fontSize: 13, marginBottom: 20,
+        }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* No results */}
+      {results !== null && results.length === 0 && (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: '32px 24px', textAlign: 'center', color: C.textMuted, fontSize: 14,
+        }}>
+          😶 No Closed Won accounts found in <strong style={{ color: C.textSec }}>{resolvedState}</strong>
+          {query.includes(',') ? ` near "${query.split(',')[0].trim()}"` : ''}.
+          <div style={{ fontSize: 12, marginTop: 6 }}>Try a broader state search.</div>
+        </div>
+      )}
+
+      {/* Results */}
+      {results && results.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ color: C.textMuted, fontSize: 12, marginBottom: -4 }}>
+            {results.length} reference{results.length !== 1 ? 's' : ''} found in <strong style={{ color: C.accent }}>{resolvedState}</strong>
+            {query.includes(',') ? ` · near "${query.split(',')[0].trim()}"` : ''}
+          </div>
+
+          {results.map((ref, i) => (
+            <div key={i} style={{
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: '18px 20px', transition: 'border-color 0.15s',
+            }}>
+              {/* Account header */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <a
+                    href={ref.sfdc_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      color: C.textPri, fontWeight: 700, fontSize: 15,
+                      textDecoration: 'none', letterSpacing: '-0.2px',
+                    }}
+                  >
+                    {ref.accountName}
+                    <span style={{ color: C.accent, fontSize: 11, marginLeft: 6 }}>↗</span>
+                  </a>
+                  <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>
+                    📍 {[ref.city, ref.state].filter(Boolean).join(', ') || '—'}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{
+                    color: C.green, fontWeight: 800, fontSize: 16,
+                  }}>
+                    {fmtAmount(ref.amount)}
+                  </div>
+                  <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>
+                    Closed {fmtDate(ref.closeDate)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Contacts */}
+              {ref.contacts && ref.contacts.length > 0 ? (
+                <div style={{
+                  display: 'flex', gap: 10, flexWrap: 'wrap',
+                  borderTop: `1px solid ${C.borderSub}`, paddingTop: 12,
+                }}>
+                  {ref.contacts.map((c, j) => (
+                    <div key={j} style={{
+                      background: C.surface, border: `1px solid ${C.borderSub}`,
+                      borderRadius: 8, padding: '8px 12px', flex: '1 1 200px', minWidth: 180,
+                    }}>
+                      <div style={{ color: C.textPri, fontWeight: 600, fontSize: 13 }}>{c.name}</div>
+                      <div style={{ color: C.purple, fontSize: 11, marginTop: 2 }}>{c.title || '—'}</div>
+                      {c.phone && (
+                        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>
+                          📞 {c.phone}
+                        </div>
+                      )}
+                      {c.email && (
+                        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>
+                          ✉️ {c.email}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  borderTop: `1px solid ${C.borderSub}`, paddingTop: 10,
+                  color: C.textMuted, fontSize: 12,
+                }}>
+                  No senior contacts on file
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Usage tip */}
+      {results === null && !loading && (
+        <div style={{
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+          padding: '20px 24px', color: C.textMuted, fontSize: 13,
+        }}>
+          <div style={{ fontWeight: 700, color: C.textSec, marginBottom: 8 }}>💡 How to use</div>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
+            <li>Type a <strong>state</strong> like <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>Ohio</code> or <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>NY</code></li>
+            <li>Or a <strong>city + state</strong> like <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>Baton Rouge, LA</code></li>
+            <li>Works with fuzzy input: <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>upstate NY</code>, <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>southern california</code></li>
+            <li>Returns up to 3 Closed Won accounts sorted by deal size</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const { data: session } = useSession();
@@ -5256,6 +5472,7 @@ export default function Home() {
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('opportunities', '💼 Opportunities')}
               {tabBtn('activities', '📞 Activities')}
+              {tabBtn('references', '📍 References')}
               {tabBtn('manage', '⚙️ Manage')}
             </div>
 
@@ -5349,6 +5566,9 @@ export default function Home() {
 
         {/* ── Activities Tab ── */}
         {activeTab === 'activities' && <ActivitiesDataTab />}
+
+        {/* ── References Tab ── */}
+        {activeTab === 'references' && <ReferencesTab />}
 
         {/* ── Manage Tab (includes Sync Log sub-tab) ── */}
         {activeTab === 'manage' && <ManageTab />}
