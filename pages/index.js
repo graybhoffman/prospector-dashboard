@@ -2267,6 +2267,113 @@ function DataSection() {
       'Pilot Deployment','Full Deployment','Closed-Won',
     ];
 
+    // ── Row Expand State ──────────────────────────────────────────────────
+    const [expandedAccountId, setExpandedAccountId] = useState(null);
+    const [expandedDetail, setExpandedDetail]       = useState({});   // { [id]: account }
+    const [expandLoading, setExpandLoading]         = useState({});   // { [id]: bool }
+
+    async function toggleExpand(accountId) {
+      if (expandedAccountId === accountId) {
+        setExpandedAccountId(null);
+        return;
+      }
+      setExpandedAccountId(accountId);
+      if (!expandedDetail[accountId]) {
+        setExpandLoading(prev => ({ ...prev, [accountId]: true }));
+        try {
+          const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`);
+          const data = await r.json();
+          setExpandedDetail(prev => ({ ...prev, [accountId]: data.account }));
+        } catch (e) {
+          console.error('Failed to load account detail:', e);
+        } finally {
+          setExpandLoading(prev => ({ ...prev, [accountId]: false }));
+        }
+      }
+    }
+
+    // ── Expanded Detail Panel ─────────────────────────────────────────────
+    const EXPAND_SECTIONS = [
+      { title: '🏷 Identity',    fields: ['name','domain','billing_city','billing_state','industry','ehr_system','specialty'] },
+      { title: '📏 Size',        fields: ['num_employees','num_providers','num_locations','annual_revenue','est_monthly_call_volume'] },
+      { title: '🔭 Pipeline',    fields: ['agents_stage','agents_owner','agents_icp','db_status','campaign_tag','source_category','source_sub_category'] },
+      { title: '🔍 Enrichment',  fields: ['website','phone','description','enrichment_notes','next_step','last_touch_date','roe_flag','roe_flag_notes'] },
+      { title: '☁ SFDC',        fields: ['sfdc_id','sfdc_account_name','related_hotlist_name'] },
+      { title: '🕐 Meta',        fields: ['created_at','updated_at'] },
+    ];
+
+    function fmtFieldValue(val) {
+      if (val === null || val === undefined || val === '') return '—';
+      if (typeof val === 'boolean') return val ? '✓ Yes' : '✗ No';
+      if (val instanceof Date || (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}/.test(val))) {
+        try { return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch {}
+      }
+      if (typeof val === 'number') return val.toLocaleString();
+      if (Array.isArray(val)) return val.length ? val.join(', ') : '—';
+      return String(val);
+    }
+
+    function AccountExpandPanel({ accountId }) {
+      const loading = expandLoading[accountId];
+      const acc     = expandedDetail[accountId];
+      const totalColSpan = 13; // number of columns in the accounts table
+
+      return (
+        <tr key={`${accountId}-expand`}>
+          <td colSpan={totalColSpan} style={{ padding: 0, background: '#0d0d18', borderBottom: `2px solid ${C.accent}44` }}>
+            <div style={{ padding: '16px 20px' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <span style={{ color: C.accent, fontWeight: 700, fontSize: 13 }}>
+                  📋 Full Account Detail
+                  {acc && <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 8, fontSize: 11 }}>{acc.name}</span>}
+                </span>
+                <button
+                  onClick={() => setExpandedAccountId(null)}
+                  style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 6, color: C.textMuted, cursor: 'pointer', fontSize: 12, padding: '3px 10px' }}
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              {loading && (
+                <div style={{ color: C.textMuted, fontSize: 12, padding: '20px 0', textAlign: 'center' }}>⟳ Loading account details…</div>
+              )}
+
+              {!loading && acc && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+                  {EXPAND_SECTIONS.map(sec => (
+                    <div key={sec.title} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>
+                        {sec.title}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {sec.fields.map(field => {
+                          const rawVal = acc[field];
+                          const display = fmtFieldValue(rawVal);
+                          const isBlank = display === '—';
+                          return (
+                            <div key={field} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                              <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{field.replace(/_/g, ' ')}</span>
+                              <span style={{ color: isBlank ? C.textMuted : C.textSec, fontSize: 12, wordBreak: 'break-word' }}>{display}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!loading && !acc && (
+                <div style={{ color: C.red, fontSize: 12 }}>⚠ Failed to load account details.</div>
+              )}
+            </div>
+          </td>
+        </tr>
+      );
+    }
+
     function RoeBadge({ issues }) {
       if (!issues || issues.length === 0) return <span style={S.muted}>—</span>;
       const hasRed = issues.some(i => i.toLowerCase().includes('closed-won') || i.toLowerCase().includes('closed won'));
@@ -2341,17 +2448,24 @@ function DataSection() {
                     const sourceCategory = a.source_category || a.sourceCategory;
                     const owner = a.agents_owner || a.agentsTeamOwner;
                     const roeIssues = Array.isArray(a.potential_roe_issue) ? a.potential_roe_issue : (Array.isArray(a.potentialRoeIssue) ? a.potentialRoeIssue : (a.potentialRoeIssue ? [a.potentialRoeIssue] : []));
-                    return (
-                    <tr key={accountId} style={{ transition: 'background 0.1s' }}
+                    const isExpanded = expandedAccountId === accountId;
+                    return [
+                    <tr key={accountId}
+                      onClick={() => toggleExpand(accountId)}
+                      style={{ transition: 'background 0.1s', cursor: 'pointer', background: isExpanded ? '#252540' : '' }}
                       onMouseEnter={e => e.currentTarget.style.background = '#252540'}
-                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                      onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = ''; }}
+                    >
                       <td style={{ ...S.td(i), maxWidth: 220 }}>
-                        {sfdcLink
-                          ? <a href={sfdcLink} target="_blank" rel="noreferrer" style={{ ...S.link, fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</a>
-                          : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</span>}
-                        {excluded && (
-                          <span style={{background:'#374151', color:'#9ca3af', fontSize:10, padding:'1px 5px', borderRadius:3, marginLeft:6}}>excluded</span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span style={{ color: C.textMuted, fontSize: 10, transition: 'transform 0.2s', display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'none' }}>▶</span>
+                          {sfdcLink
+                            ? <a href={sfdcLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ ...S.link, fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</a>
+                            : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(excluded ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>{accountName}</span>}
+                          {excluded && (
+                            <span style={{background:'#374151', color:'#9ca3af', fontSize:10, padding:'1px 5px', borderRadius:3, marginLeft:6}}>excluded</span>
+                          )}
+                        </div>
                       </td>
                       <td style={S.td(i)}>
                         <span style={{
@@ -2362,22 +2476,22 @@ function DataSection() {
                       </td>
                       <td style={S.td(i)}><span style={{ color: '#a78bfa' }}>{ehr || '—'}</span></td>
                       <td style={S.td(i)}>{isICP ? <span style={S.icpBadge}>ICP</span> : <span style={S.muted}>—</span>}</td>
-                      <td style={S.td(i)}>
+                      <td style={S.td(i)} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={revenue != null ? revenue : ''} fieldKey="annual_revenue" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}>
+                      <td style={S.td(i)} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={providers != null ? providers : ''} fieldKey="num_providers" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}>
+                      <td style={S.td(i)} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={employees != null ? employees : ''} fieldKey="num_employees" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}>
+                      <td style={S.td(i)} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={locations != null ? locations : ''} fieldKey="num_locations" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={S.td(i)}>
+                      <td style={S.td(i)} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={callVol != null ? callVol : ''} fieldKey="est_monthly_call_volume" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
-                      <td style={{ ...S.td(i), maxWidth: 140 }}>
+                      <td style={{ ...S.td(i), maxWidth: 140 }} onClick={e => e.stopPropagation()}>
                         <InlineEdit value={specialty || ''} fieldKey="specialty" accountId={accountId} onSave={handleInlineEdit} />
                       </td>
                       <td style={S.td(i)}><span style={S.muted}>{sourceCategory || '—'}</span></td>
@@ -2385,8 +2499,9 @@ function DataSection() {
                       <td style={S.td(i)}>
                         <RoeBadge issues={roeIssues} />
                       </td>
-                    </tr>
-                    );
+                    </tr>,
+                    isExpanded && <AccountExpandPanel key={`${accountId}-expand`} accountId={accountId} />,
+                    ];
                   })}
                 </tbody>
               </table>
@@ -3186,6 +3301,44 @@ function TeamsSettings() {
   const [userInput, setUserInput] = useState('');
   const [msg, setMsg]             = useState('');
 
+  // ── SFDC User Sync state ──────────────────────────────────────────────────
+  const [sfdcUsers,      setSfdcUsers]      = useState([]);
+  const [sfdcLoading,    setSfdcLoading]    = useState(false);
+  const [sfdcError,      setSfdcError]      = useState(null);
+  const [sfdcSynced,     setSfdcSynced]     = useState(false);
+  const [agentsTeamIds,  setAgentsTeamIds]  = useState(() => {
+    if (typeof window === 'undefined') return [];
+    try { return JSON.parse(localStorage.getItem('wt_agents_team_sfdc_ids') || '[]'); } catch { return []; }
+  });
+
+  function toggleAgentsTeam(sfdc_id) {
+    setAgentsTeamIds(prev => {
+      const next = prev.includes(sfdc_id)
+        ? prev.filter(id => id !== sfdc_id)
+        : [...prev, sfdc_id];
+      try { localStorage.setItem('wt_agents_team_sfdc_ids', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  async function syncSfdcUsers() {
+    setSfdcLoading(true);
+    setSfdcError(null);
+    try {
+      const r = await fetch('/api/sfdc-users');
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || data.error || 'Sync failed');
+      setSfdcUsers(data.users || []);
+      // Cache user list in localStorage for ActivityDashboard agent team lookup
+      try { localStorage.setItem('wt_sfdc_users_cache', JSON.stringify(data.users || [])); } catch {}
+      setSfdcSynced(true);
+    } catch (e) {
+      setSfdcError(e.message);
+    } finally {
+      setSfdcLoading(false);
+    }
+  }
+
   function openCreate() { setForm({ name: '', color: '#3b82f6', user_names: [] }); setEditTeam(null); setUserInput(''); setShowModal(true); }
   function openEdit(t)  { setForm({ name: t.name, color: t.color, user_names: [...(t.user_names || [])] }); setEditTeam(t); setUserInput(''); setShowModal(true); }
   function closeModal() { setShowModal(false); setEditTeam(null); setMsg(''); }
@@ -3535,8 +3688,8 @@ function EmptyRow({ cols, msg = 'No activity today yet' }) {
 }
 
 // Outbound Calls table
-function OutboundCallsTable() {
-  const { data, isLoading } = useSWR('/api/activities?window=today&type=call', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+function OutboundCallsTable({ teamSuffix = '' }) {
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=call${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
   return (
@@ -3550,7 +3703,10 @@ function OutboundCallsTable() {
               ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{r.account_name || r.account_sfdc_id}</a>
               : <span style={{ color: C.textMuted }}>{r.account_name || '—'}</span>}
           </td>
-          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.contact_name?.trim() || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>
+            {r.contact_name?.trim() || '—'}
+            {r.contact_title ? <span style={{ color: C.textMuted, fontSize: 11 }}> · {r.contact_title}</span> : null}
+          </td>
           <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtDuration(r.duration_seconds)}</td>
           <td style={{ padding: '6px 12px' }}><OutcomeBadge outcome={r.outcome} /></td>
           <td style={{ padding: '6px 12px' }}><SfdcLink sfdc_id={r.sfdc_id} /></td>
@@ -3561,8 +3717,8 @@ function OutboundCallsTable() {
 }
 
 // Live Connects table
-function LiveConnectsTable() {
-  const { data, isLoading } = useSWR('/api/activities?window=today&type=connects', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+function LiveConnectsTable({ teamSuffix = '' }) {
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=connects${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
   return (
@@ -3576,7 +3732,10 @@ function LiveConnectsTable() {
               ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{r.account_name || r.account_sfdc_id}</a>
               : <span style={{ color: C.textMuted }}>{r.account_name || '—'}</span>}
           </td>
-          <td style={{ padding: '6px 12px', color: C.textSec }}>{r.contact_name?.trim() || '—'}</td>
+          <td style={{ padding: '6px 12px', color: C.textSec }}>
+            {r.contact_name?.trim() || '—'}
+            {r.contact_title ? <span style={{ color: C.textMuted, fontSize: 11 }}> · {r.contact_title}</span> : null}
+          </td>
           <td style={{ padding: '6px 12px', color: C.textSec, whiteSpace: 'nowrap' }}>{fmtDuration(r.duration_seconds)}</td>
           <td style={{ padding: '6px 12px' }}><OutcomeBadge outcome={r.outcome} /></td>
           <td style={{ padding: '6px 12px' }}><SfdcLink sfdc_id={r.sfdc_id} /></td>
@@ -3587,8 +3746,8 @@ function LiveConnectsTable() {
 }
 
 // Contacts Contacted table
-function ContactsContactedTable() {
-  const { data, isLoading } = useSWR('/api/activities?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+function ContactsContactedTable({ teamSuffix = '' }) {
+  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const rows = data?.activities || [];
 
   // Group by contact_sfdc_id (or contact_name if no sfdc_id)
@@ -3597,7 +3756,7 @@ function ContactsContactedTable() {
     for (const r of rows) {
       const key = r.contact_sfdc_id || r.contact_name || 'unknown';
       if (!map.has(key)) {
-        map.set(key, { contact_name: r.contact_name?.trim() || '—', account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, rep: r.rep || '—', types: new Set(), lastTouch: r.activity_date });
+        map.set(key, { contact_name: r.contact_name?.trim() || '—', contact_title: r.contact_title || null, account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, rep: r.rep || '—', types: new Set(), lastTouch: r.activity_date });
       }
       const g = map.get(key);
       if (r.type) g.types.add(r.type);
@@ -3612,7 +3771,10 @@ function ContactsContactedTable() {
     <DetailTableShell label="👤 Contacts Contacted" columns={cols} count={isLoading ? null : grouped.length}>
       {isLoading ? <SkeletonRows cols={5} /> : grouped.length === 0 ? <EmptyRow cols={5} /> : grouped.map((g, i) => (
         <tr key={i} style={{ borderBottom: `1px solid ${C.border}1a` }}>
-          <td style={{ padding: '6px 12px', color: C.text }}>{g.contact_name}</td>
+          <td style={{ padding: '6px 12px', color: C.text }}>
+            {g.contact_name}
+            {g.contact_title ? <span style={{ color: C.textMuted, fontSize: 11 }}> · {g.contact_title}</span> : null}
+          </td>
           <td style={{ padding: '6px 12px' }}>
             {g.account_sfdc_id
               ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${g.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{g.account_name}</a>
@@ -3628,8 +3790,8 @@ function ContactsContactedTable() {
 }
 
 // Accounts Contacted table
-function AccountsContactedTable() {
-  const { data, isLoading } = useSWR('/api/activities?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+function AccountsContactedTable({ teamSuffix = '' }) {
+  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const rows = data?.activities || [];
 
   const grouped = useMemo(() => {
@@ -3637,7 +3799,7 @@ function AccountsContactedTable() {
     for (const r of rows) {
       const key = r.account_sfdc_id || r.account_name || 'unknown';
       if (!map.has(key)) {
-        map.set(key, { account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, account_stage: r.account_stage, rep: r.rep || '—', touches: 0, types: new Set() });
+        map.set(key, { account_name: r.account_name || '—', account_sfdc_id: r.account_sfdc_id, account_stage: r.account_stage, account_ehr: r.account_ehr || null, rep: r.rep || '—', touches: 0, types: new Set() });
       }
       const g = map.get(key);
       g.touches++;
@@ -3656,6 +3818,7 @@ function AccountsContactedTable() {
             {g.account_sfdc_id
               ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${g.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue }}>{g.account_name}</a>
               : <span style={{ color: C.text }}>{g.account_name}</span>}
+            {g.account_ehr ? <span style={{ color: C.textMuted, fontSize: 11 }}> · {g.account_ehr}</span> : null}
           </td>
           <td style={{ padding: '6px 12px', color: C.textSec }}>{g.rep}</td>
           <td style={{ padding: '6px 12px', textAlign: 'center', color: C.text, fontWeight: 600 }}>{g.touches}</td>
@@ -3668,8 +3831,8 @@ function AccountsContactedTable() {
 }
 
 // Sets table
-function SetsTable() {
-  const { data, isLoading } = useSWR('/api/activities?window=today&type=sets', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+function SetsTable({ teamSuffix = '' }) {
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=sets${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Account', 'Contact', 'Rep', 'Subject', 'SFDC'];
   return (
@@ -3881,13 +4044,48 @@ function ActivityTrendCharts() {
 
 // ─── Activity Dashboard ───────────────────────────────────────────────────────
 function ActivityDashboard() {
+  // ── All ICP data (no team filter) ──
   const { data: todayData,   isLoading: todayLoading  } = useSWR('/api/activity-stats?window=today',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const { data: weekData,    isLoading: weekLoading   } = useSWR('/api/activity-stats?window=week',   fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
 
+  // ── Agents Team setup ──
+  const [agentsTeamUserNames, setAgentsTeamUserNames] = useState([]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const ids = JSON.parse(localStorage.getItem('wt_agents_team_sfdc_ids') || '[]');
+      const users = JSON.parse(localStorage.getItem('wt_sfdc_users_cache') || '[]');
+      if (ids.length > 0 && users.length > 0) {
+        const names = users
+          .filter(u => ids.includes(u.Id))
+          .map(u => u.Name)
+          .filter(Boolean);
+        setAgentsTeamUserNames(names);
+      }
+    } catch {}
+  }, []);
+
+  const hasAgentsTeam = agentsTeamUserNames.length > 0;
+  const agentsSuffix = hasAgentsTeam
+    ? `&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
+    : '';
+
+  const agentsStatUrl = hasAgentsTeam
+    ? `/api/activity-stats?window=today&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
+    : null;
+  const agentsWeekStatUrl = hasAgentsTeam
+    ? `/api/activity-stats?window=week&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
+    : null;
+
+  const { data: agentsTodayData, isLoading: agentsTodayLoading } = useSWR(agentsStatUrl, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: agentsWeekData,  isLoading: agentsWeekLoading  } = useSWR(agentsWeekStatUrl, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+
   const today = todayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
   const week  = weekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-  const isLive = todayData?.isLive ?? false;
+  const agentsToday = agentsTodayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const agentsWeek  = agentsWeekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
 
+  const isLive = todayData?.isLive ?? false;
   const liveNote = !isLive ? 'Live once SFDC sync active' : null;
 
   return (
@@ -3900,8 +4098,44 @@ function ActivityDashboard() {
         </div>
       )}
 
-      {/* ── Section 1 — Today's Stats ── */}
-      <DashSection title="📊 Today's Stats" accent={C.blue}>
+      {/* ── Section 1 — Agents Team Activity ── */}
+      <DashSection title="🤖 Agents Team Activity" accent={C.purple}>
+        {!hasAgentsTeam ? (
+          <div style={{ padding: '16px', color: C.textMuted, fontSize: 13, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, textAlign: 'center' }}>
+            No Agents Team defined — go to <strong style={{ color: C.textSec }}>Settings → Teams &amp; Users</strong> to configure
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+              Filtering for: {agentsTeamUserNames.join(', ')}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+              <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={agentsToday.calls}              target={40} loading={agentsTodayLoading} note={liveNote} />
+              <ActivityMetricCard emoji="🔗" label="Live Connects"       value={agentsToday.connects}           target={4}  loading={agentsTodayLoading} note={liveNote} />
+              <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={agentsToday.contactsContacted}  target={null} loading={agentsTodayLoading} note={liveNote} />
+              <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={agentsToday.accountsContacted}  target={null} loading={agentsTodayLoading} note={liveNote} />
+              <ActivityMetricCard emoji="📅" label="Sets"                value={agentsToday.sets}               target={1}  loading={agentsTodayLoading} note={liveNote} />
+            </div>
+          </>
+        )}
+      </DashSection>
+
+      {/* ── Section 1b — Agents Team Daily Activity Detail ── */}
+      {hasAgentsTeam && (
+        <DashSection title="📋 Agents Team Daily Detail" accent={C.purple} defaultOpen={false}>
+          <ActivitySyncBanner onRefresh={() => {
+            if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();
+          }} />
+          <OutboundCallsTable teamSuffix={agentsSuffix} />
+          <LiveConnectsTable teamSuffix={agentsSuffix} />
+          <ContactsContactedTable teamSuffix={agentsSuffix} />
+          <AccountsContactedTable teamSuffix={agentsSuffix} />
+          <SetsTable teamSuffix={agentsSuffix} />
+        </DashSection>
+      )}
+
+      {/* ── Section 2 — All ICP Account Activity ── */}
+      <DashSection title="📊 All ICP Account Activity" accent={C.blue}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
           <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}              target={40} loading={todayLoading} note={liveNote} />
           <ActivityMetricCard emoji="🔗" label="Live Connects"       value={today.connects}           target={4}  loading={todayLoading} note={liveNote} />
@@ -3911,8 +4145,8 @@ function ActivityDashboard() {
         </div>
       </DashSection>
 
-      {/* ── Section 2 — Daily Activity Detail ── */}
-      <DashSection title="📋 Daily Activity Detail" accent={C.purple} defaultOpen={false}>
+      {/* ── Section 2b — All ICP Daily Activity Detail ── */}
+      <DashSection title="📋 All ICP Daily Activity Detail" accent={C.blue} defaultOpen={false}>
         <ActivitySyncBanner onRefresh={() => {
           // Trigger SWR revalidation by mutating cache keys
           if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();

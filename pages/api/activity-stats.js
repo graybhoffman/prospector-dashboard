@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const { window: win = 'today' } = req.query;
+  const { window: win = 'today', teamUserNames } = req.query;
 
   try {
     // Check if activities table exists and has data
@@ -89,7 +89,7 @@ export default async function handler(req, res) {
     const now = new Date();
 
     if (win === 'today') {
-      const stats = await getStats('today', null, null);
+      const stats = await getStats('today', null, null, teamUserNames);
       return res.status(200).json({ isLive: true, window: win, stats });
     }
 
@@ -106,13 +106,14 @@ export default async function handler(req, res) {
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().slice(0, 10);
-        daily[dayNames[i]] = await getStatsForDate(ds);
+        daily[dayNames[i]] = await getStatsForDate(ds, teamUserNames);
       }
 
       // Week totals
       const stats = await getStats('range',
         monday.toISOString().slice(0, 10),
-        now.toISOString().slice(0, 10)
+        now.toISOString().slice(0, 10),
+        teamUserNames
       );
 
       return res.status(200).json({ isLive: true, window: win, stats, daily });
@@ -124,7 +125,7 @@ export default async function handler(req, res) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
         const ds = d.toISOString().slice(0, 10);
-        const s = await getStatsForDate(ds);
+        const s = await getStatsForDate(ds, teamUserNames);
         trend.push({
           label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           ...s,
@@ -143,7 +144,7 @@ export default async function handler(req, res) {
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
         sunday.setHours(23, 59, 59, 999);
-        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10));
+        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames);
         trend.push({
           label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
           ...s,
@@ -157,7 +158,7 @@ export default async function handler(req, res) {
       for (let i = 3; i >= 0; i--) {
         const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames);
         trend.push({
           label: start.toLocaleDateString('en-US', { month: 'short' }),
           ...s,
@@ -176,7 +177,7 @@ export default async function handler(req, res) {
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
         sunday.setHours(23, 59, 59, 999);
-        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10));
+        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames);
         trend.push({
           label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
           ...s,
@@ -190,7 +191,7 @@ export default async function handler(req, res) {
       for (let i = 5; i >= 0; i--) {
         const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames);
         trend.push({
           label: start.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
           ...s,
@@ -208,11 +209,11 @@ export default async function handler(req, res) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function getStatsForDate(dateStr) {
-  return getStats('date', dateStr, null);
+async function getStatsForDate(dateStr, teamUserNames) {
+  return getStats('date', dateStr, null, teamUserNames);
 }
 
-async function getStats(mode, start, end) {
+async function getStats(mode, start, end, teamUserNames) {
   let dateClause;
   if (mode === 'today') {
     dateClause = `DATE(activity_date AT TIME ZONE 'UTC') = CURRENT_DATE`;
@@ -220,6 +221,18 @@ async function getStats(mode, start, end) {
     dateClause = `DATE(activity_date AT TIME ZONE 'UTC') = '${start}'`;
   } else {
     dateClause = `DATE(activity_date AT TIME ZONE 'UTC') BETWEEN '${start}' AND '${end}'`;
+  }
+
+  // Build team filter
+  let teamClause = '';
+  const queryParams = [];
+  if (teamUserNames) {
+    const names = teamUserNames.split(',').map(n => n.trim()).filter(Boolean);
+    if (names.length > 0) {
+      const placeholders = names.map((_, i) => `$${i + 1}`).join(', ');
+      teamClause = `AND rep IN (${placeholders})`;
+      queryParams.push(...names);
+    }
   }
 
   try {
@@ -239,7 +252,8 @@ async function getStats(mode, start, end) {
         ) AS sets
       FROM activities
       WHERE ${dateClause}
-    `);
+      ${teamClause}
+    `, queryParams.length > 0 ? queryParams : undefined);
 
     const r = result.rows[0] || {};
     return {

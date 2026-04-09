@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { date, type, window: win, limit = 200 } = req.query;
+  const { date, type, window: win, limit = 200, teamUserNames } = req.query;
 
   let dateFilter = '';
   const params = [];
@@ -39,6 +39,17 @@ export default async function handler(req, res) {
 
   let typeFilter = '';
   let extraFilter = '';
+  let teamFilter = '';
+
+  // Team filter: filter by rep names
+  if (teamUserNames) {
+    const names = teamUserNames.split(',').map(n => n.trim()).filter(Boolean);
+    if (names.length > 0) {
+      const placeholders = names.map((_, i) => `$${params.length + i + 1}`).join(', ');
+      teamFilter = `AND a.rep IN (${placeholders})`;
+      params.push(...names);
+    }
+  }
 
   if (type === 'sets') {
     typeFilter = '';
@@ -69,7 +80,9 @@ export default async function handler(req, res) {
       a.contact_sfdc_id,
       acc.name AS account_name,
       acc.agents_stage AS account_stage,
-      CONCAT(c.first_name, ' ', c.last_name) AS contact_name
+      acc.ehr_system AS account_ehr,
+      CONCAT(c.first_name, ' ', c.last_name) AS contact_name,
+      c.title AS contact_title
     FROM activities a
     LEFT JOIN accounts acc ON acc.sfdc_id = a.account_sfdc_id
     LEFT JOIN contacts c ON c.sfdc_id = a.contact_sfdc_id
@@ -77,6 +90,7 @@ export default async function handler(req, res) {
       ${dateFilter}
       ${typeFilter}
       ${extraFilter}
+      ${teamFilter}
     ORDER BY a.activity_date DESC
     LIMIT ${limitInt}
   `;
