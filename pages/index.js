@@ -4131,8 +4131,10 @@ function SetsTable({ teamSuffix = '' }) {
 
 // Sync Banner
 function ActivitySyncBanner({ onRefresh }) {
-  const { data: syncData } = useSWR('/api/sync-log', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: syncData, mutate: mutateSyncLog } = useSWR('/api/sync-log', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
   const [now, setNow] = useState(Date.now());
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 10000);
@@ -4153,18 +4155,39 @@ function ActivitySyncBanner({ onRefresh }) {
     return ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
+  async function handleRefreshClick() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/sync-activities', { method: 'POST' });
+      const data = await res.json();
+      setSyncResult(data.error ? `Error: ${data.error}` : `✓ ${data.synced} records synced`);
+      // Revalidate SWR caches
+      mutateSyncLog();
+      if (onRefresh) onRefresh();
+      if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();
+    } catch (err) {
+      setSyncResult(`Error: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
-      <span>🔄</span>
+      <span>{syncing ? '⏳' : '🔄'}</span>
       <span>Last synced: <strong style={{ color: C.textSec }}>{relTime(lastSyncedAt)}</strong></span>
       <span style={{ color: C.border }}>·</span>
       <span>Auto-refresh every 60s</span>
       <span style={{ color: C.border }}>·</span>
       <button
-        onClick={onRefresh}
-        style={{ background: 'none', border: 'none', color: C.blue, cursor: 'pointer', fontSize: 11, padding: 0, textDecoration: 'underline' }}>
-        Refresh now
+        onClick={handleRefreshClick}
+        disabled={syncing}
+        style={{ background: 'none', border: 'none', color: syncing ? C.textMuted : C.blue, cursor: syncing ? 'not-allowed' : 'pointer', fontSize: 11, padding: 0, textDecoration: 'underline' }}>
+        {syncing ? 'Syncing…' : 'Refresh now'}
       </button>
+      {syncResult && <span style={{ color: syncResult.startsWith('Error') ? '#e74c3c' : '#27ae60' }}>{syncResult}</span>}
     </div>
   );
 }
