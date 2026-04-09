@@ -67,7 +67,7 @@ const DEFAULT_PIPELINE_FILTERS = { stage: [] };
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
 const PIPELINE_DEFAULT_COLS = new Set([
-  'Account Name','EHR','Stage','Specialty',
+  'Account Name','Stage','EHR','Specialty',
   'Potential ROE Issue','Not in RCM ICP','Providers #','Annual Revenue ($)',
 ]);
 
@@ -488,11 +488,6 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
         label="Closed-Won accounts (incl. Pilot &amp; Full Deployment)"
         current={g2} target={t2} color={C.green}
       />
-      <GoalRow
-        goalKey="goal3"
-        label="Deployed ARR"
-        current={g3} target={t3} color={C.amber} format="currency"
-      />
     </Section>
   );
 }
@@ -521,7 +516,6 @@ function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summ
     { label: 'Est. TAM Value',       value: fmt(stats.total * 150_000, 'currency'), color: C.green,  sub: '@ $150K avg ACV' },
     { label: 'Non-RCM ICP',          value: fmt(stats.notRcmCount),                 color: C.amber   },
     { label: 'Confirmed ICP Tier',   value: fmt(stats.confirmedIcpCount),            color: C.purple  },
-    { label: 'Deployed ARR',         value: '$650K',                                 color: C.green,  sub: 'Nathan Littauer $575K + Medvanta $75K' },
   ];
   const statCards = allStatCards.filter(({ label }) => !hiddenLabels.includes(label));
 
@@ -576,15 +570,11 @@ function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summ
                 All accounts in the <strong style={{ color: C.textPri }}>Voice Agents Pipeline</strong> Notion DB.
               </p>
               <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>ICP criteria:</p>
-              <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, lineHeight: 1.8 }}>
+              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
                 <li>Healthcare practice (not a vendor/tech company)</li>
                 <li>Target EHR: eCW, Athena/Athenahealth, ModMed, AdvancedMD, MEDITECH, or Epic</li>
                 <li>Size: $10M+ revenue OR 25+ providers OR 50+ employees OR 10+ locations</li>
               </ul>
-              <p style={{ margin: '0 0 6px 0', color: C.textPri, fontWeight: 600 }}>Deployed ARR:</p>
-              <p style={{ margin: 0, lineHeight: 1.6 }}>
-                Nathan Littauer Hospital (<span style={{ color: C.green }}>$575K</span>) + Medvanta (<span style={{ color: C.green }}>$75K</span>) = <strong style={{ color: C.green }}>$650K</strong> actual
-              </p>
             </div>
           </>
         )}
@@ -1253,7 +1243,9 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
   });
 
   const schemaProps = schema?.pipeline?.properties || {};
-  const propOrder   = schema?.pipeline?.propOrder  || [...PIPELINE_DEFAULT_COLS];
+  const rawPropOrder = schema?.pipeline?.propOrder || [...PIPELINE_DEFAULT_COLS];
+  // Always put Account Name first
+  const propOrder = ['Account Name', ...rawPropOrder.filter((c) => c !== 'Account Name')];
   const agg         = pipelineData?.aggregations;
   const records     = pipelineData?.records;
   const meta        = pipelineData?.meta;
@@ -4125,6 +4117,30 @@ function AccountsDataTab() {
       },
       getValue: (row) => row.source_category,
     },
+    {
+      key: 'annual_revenue', label: 'Revenue', width: 100, filterable: false,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.annual_revenue ? fmtCurrency(Number(row.annual_revenue)) : '—'}</span>,
+      getValue: (row) => row.annual_revenue,
+    },
+    {
+      key: 'est_monthly_call_volume', label: 'Call Vol/Mo', width: 90, filterable: false,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.est_monthly_call_volume || '—'}</span>,
+      getValue: (row) => row.est_monthly_call_volume,
+    },
+    {
+      key: 'next_step', label: 'Next Step', width: 200, sortable: false,
+      render: (row) => <span style={{ color: C.textSec, fontSize: 12, whiteSpace: 'normal', lineHeight: 1.4 }}>{row.next_step || '—'}</span>,
+      getValue: (row) => row.next_step,
+    },
+    {
+      key: 'last_activity_date', label: 'Last Touch', width: 110, filterable: false,
+      render: (row) => {
+        const d = row.last_activity_date || row.last_touch_date;
+        if (!d) return <span style={{ color: C.textMuted }}>—</span>;
+        return <span style={{ color: C.textSec, fontSize: 12 }}>{new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>;
+      },
+      getValue: (row) => row.last_activity_date || row.last_touch_date,
+    },
   ];
 
   const [showQueue, setShowQueue] = useState(false);
@@ -4366,26 +4382,143 @@ function OpportunitiesDataTab() {
 }
 
 function ActivitiesDataTab() {
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
+  const [repFilter, setRepFilter] = useState('');
+  const [repDraft, setRepDraft] = useState('');
+  const [page, setPage] = useState(1);
+  const debRef = useRef(null);
+
+  function buildUrl() {
+    const p = new URLSearchParams({ limit: 100 });
+    if (typeFilter && typeFilter !== 'all') p.set('type', typeFilter);
+    if (dateFilter) p.set('date', dateFilter);
+    return `/api/activities?${p}`;
+  }
+
+  const { data, isLoading } = useSWR(buildUrl(), fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 60_000,
+  });
+
+  let rows = data?.activities || [];
+  // Client-side rep filter
+  if (repFilter) {
+    rows = rows.filter(r => r.rep && r.rep.toLowerCase().includes(repFilter.toLowerCase()));
+  }
+
+  const PAGE_SIZE = 50;
+  const totalRows = rows.length;
+  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.ceil(totalRows / PAGE_SIZE);
+
+  const thS = { padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.4px', background: C.card, whiteSpace: 'nowrap' };
+  const tdS = { padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, fontSize: 12, color: C.textSec, whiteSpace: 'nowrap', verticalAlign: 'middle' };
+
+  function TypeBadge({ type }) {
+    const t = (type || '').toLowerCase();
+    const color = t === 'call' ? C.blue : t === 'email' ? C.purple : t === 'meeting' ? C.green : C.textMuted;
+    return <span style={{ background: color + '22', color, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>{type || '—'}</span>;
+  }
+
   return (
     <div style={{ marginTop: 16 }}>
-      <div style={{ background: C.card, border: `1px solid ${C.amber}33`, borderRadius: 12, padding: '32px 24px', textAlign: 'center' }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-        <div style={{ color: C.textPri, fontWeight: 700, fontSize: 16, marginBottom: 8 }}>Activity Log — Coming Soon</div>
-        <p style={{ color: C.textSec, fontSize: 13, margin: '0 0 16px 0', maxWidth: 500, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
-          This tab will show a full log of calls, emails, meetings, and tasks once the SFDC Task sync is active.
-          Records will include date, type, subject, account, contact, rep, outcome, and source.
-        </p>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <span style={{ background: C.green + '22', color: C.green, border: `1px solid ${C.green}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
-            ✅ Webhook endpoint ready: /api/webhook/sfdc
-          </span>
-          <span style={{ background: C.green + '22', color: C.green, border: `1px solid ${C.green}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
-            ✅ Webhook endpoint ready: /api/webhook/outreach
-          </span>
-          <span style={{ background: C.amber + '22', color: C.amber, border: `1px solid ${C.amber}44`, borderRadius: 4, padding: '3px 10px', fontSize: 12 }}>
-            ⏳ SFDC Task sync: pending
-          </span>
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1); }}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, padding: '5px 10px', fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+          <option value="all">All Types</option>
+          <option value="call">Calls</option>
+          <option value="email">Emails</option>
+          <option value="meeting">Meetings</option>
+        </select>
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={e => { setDateFilter(e.target.value); setPage(1); }}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, padding: '5px 10px', fontSize: 12, outline: 'none' }}
+        />
+        <input
+          placeholder="Filter by rep…"
+          value={repDraft}
+          onChange={e => {
+            setRepDraft(e.target.value);
+            clearTimeout(debRef.current);
+            debRef.current = setTimeout(() => { setRepFilter(e.target.value); setPage(1); }, 300);
+          }}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, padding: '5px 10px', fontSize: 12, outline: 'none', width: 160 }}
+        />
+        {(typeFilter !== 'all' || dateFilter || repFilter) && (
+          <button onClick={() => { setTypeFilter('all'); setDateFilter(''); setRepFilter(''); setRepDraft(''); setPage(1); }}
+            style={{ background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 6, color: C.textMuted, padding: '5px 10px', fontSize: 12, cursor: 'pointer' }}>
+            ✕ Clear
+          </button>
+        )}
+        {!isLoading && <span style={{ color: C.textMuted, fontSize: 12 }}>{totalRows.toLocaleString()} activities</span>}
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+            <thead>
+              <tr>
+                {['Date', 'Time', 'Type', 'Rep', 'Account', 'Contact', 'Subject', 'Duration', 'Outcome', 'Link'].map(h => (
+                  <th key={h} style={thS}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && Array.from({ length: 5 }, (_, i) => (
+                <tr key={i}>{Array.from({ length: 10 }, (__, j) => (
+                  <td key={j} style={{ ...tdS, padding: '10px 12px' }}>
+                    <div style={{ height: 10, borderRadius: 4, background: C.border + '88', width: `${40 + (i * j) % 50}%` }} />
+                  </td>
+                ))}</tr>
+              ))}
+              {!isLoading && paged.length === 0 && (
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: '40px 0', color: C.textMuted, fontSize: 13 }}>
+                  No activities found for the current filters.
+                  {!dateFilter && <span style={{ display: 'block', marginTop: 6, fontSize: 11 }}>Tip: select a date to filter, or leave blank for all records.</span>}
+                </td></tr>
+              )}
+              {!isLoading && paged.map((r, i) => {
+                const date = r.activity_date ? new Date(r.activity_date) : null;
+                return (
+                  <tr key={r.id || i}
+                    style={{ transition: 'background 0.1s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={tdS}>{date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                    <td style={tdS}>{date ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}</td>
+                    <td style={tdS}><TypeBadge type={r.type} /></td>
+                    <td style={{ ...tdS, color: C.textPri, fontWeight: 500 }}>{r.rep || '—'}</td>
+                    <td style={tdS}>
+                      {r.account_sfdc_id
+                        ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noreferrer" style={{ color: C.accent }}>{r.account_name || r.account_sfdc_id}</a>
+                        : <span>{r.account_name || '—'}</span>}
+                    </td>
+                    <td style={tdS}>{r.contact_name?.trim() || '—'}</td>
+                    <td style={{ ...tdS, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.subject || '—'}</td>
+                    <td style={tdS}>{r.duration_seconds ? (() => { const s = parseInt(r.duration_seconds); const m = Math.floor(s/60); return m > 0 ? `${m}m ${s%60}s` : `${s}s`; })() : '—'}</td>
+                    <td style={tdS}><OutcomeBadge outcome={r.outcome} /></td>
+                    <td style={tdS}>
+                      {r.sfdc_id ? <a href={`https://athelas.lightning.force.com/lightning/r/Task/${r.sfdc_id}/view`} target="_blank" rel="noreferrer" style={{ color: C.blue }}>↗</a> : <span style={{ color: C.textMuted }}>—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 16px', borderTop: `1px solid ${C.border}` }}>
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+              style={{ background: page <= 1 ? 'transparent' : C.card, color: page <= 1 ? C.textMuted : C.textSec, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 12px', cursor: page <= 1 ? 'not-allowed' : 'pointer', fontSize: 12 }}>← Prev</button>
+            <span style={{ color: C.textSec, fontSize: 12 }}>Page {page} of {totalPages} · {totalRows.toLocaleString()} records</span>
+            <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+              style={{ background: page >= totalPages ? 'transparent' : C.card, color: page >= totalPages ? C.textMuted : C.textSec, border: `1px solid ${C.border}`, borderRadius: 6, padding: '4px 12px', cursor: page >= totalPages ? 'not-allowed' : 'pointer', fontSize: 12 }}>Next →</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4607,7 +4740,6 @@ export default function Home() {
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('opportunities', '💼 Opportunities')}
               {tabBtn('activities', '📞 Activities')}
-              {tabBtn('synclog', '🔄 Sync Log')}
               {tabBtn('manage', '⚙️ Manage')}
             </div>
 
@@ -4702,10 +4834,7 @@ export default function Home() {
         {/* ── Activities Tab ── */}
         {activeTab === 'activities' && <ActivitiesDataTab />}
 
-        {/* ── Sync Log Tab ── */}
-        {activeTab === 'synclog' && <SyncLogDataTab />}
-
-        {/* ── Manage Tab ── */}
+        {/* ── Manage Tab (includes Sync Log sub-tab) ── */}
         {activeTab === 'manage' && <ManageTab />}
 
       </div>
