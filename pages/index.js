@@ -2269,7 +2269,7 @@ function DataSection() {
 
     // ── Row Expand State ──────────────────────────────────────────────────
     const [expandedAccountId, setExpandedAccountId] = useState(null);
-    const [expandedDetail, setExpandedDetail]       = useState({});   // { [id]: account }
+    const [expandedDetail, setExpandedDetail]       = useState({});   // { [id]: { account, contacts } }
     const [expandLoading, setExpandLoading]         = useState({});   // { [id]: bool }
 
     async function toggleExpand(accountId) {
@@ -2281,9 +2281,9 @@ function DataSection() {
       if (!expandedDetail[accountId]) {
         setExpandLoading(prev => ({ ...prev, [accountId]: true }));
         try {
-          const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`);
+          const r = await fetch(`/api/account-detail?id=${encodeURIComponent(accountId)}`);
           const data = await r.json();
-          setExpandedDetail(prev => ({ ...prev, [accountId]: data.account }));
+          setExpandedDetail(prev => ({ ...prev, [accountId]: { account: data.account, contacts: data.contacts || [] } }));
         } catch (e) {
           console.error('Failed to load account detail:', e);
         } finally {
@@ -2314,9 +2314,16 @@ function DataSection() {
     }
 
     function AccountExpandPanel({ accountId }) {
-      const loading = expandLoading[accountId];
-      const acc     = expandedDetail[accountId];
+      const loading  = expandLoading[accountId];
+      const detail   = expandedDetail[accountId];
+      const acc      = detail?.account;
+      const contacts = detail?.contacts || [];
       const totalColSpan = 13; // number of columns in the accounts table
+
+      // Build SFDC link if sfdc_id exists
+      const sfdcUrl = acc?.sfdc_id
+        ? `https://athelas.lightning.force.com/lightning/r/Account/${acc.sfdc_id}/view`
+        : null;
 
       return (
         <tr key={`${accountId}-expand`}>
@@ -2324,10 +2331,23 @@ function DataSection() {
             <div style={{ padding: '16px 20px' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                <span style={{ color: C.accent, fontWeight: 700, fontSize: 13 }}>
-                  📋 Full Account Detail
-                  {acc && <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 8, fontSize: 11 }}>{acc.name}</span>}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: C.accent, fontWeight: 700, fontSize: 13 }}>
+                    📋 Full Account Detail
+                    {acc && <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 8, fontSize: 11 }}>{acc.name}</span>}
+                  </span>
+                  {sfdcUrl && (
+                    <a
+                      href={sfdcUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      style={{ background: C.blue + '22', color: C.blue, border: `1px solid ${C.blue}44`, borderRadius: 6, padding: '3px 10px', fontSize: 11, fontWeight: 600, textDecoration: 'none' }}
+                    >
+                      ☁ Open in SFDC
+                    </a>
+                  )}
+                </div>
                 <button
                   onClick={() => setExpandedAccountId(null)}
                   style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 6, color: C.textMuted, cursor: 'pointer', fontSize: 12, padding: '3px 10px' }}
@@ -2341,28 +2361,150 @@ function DataSection() {
               )}
 
               {!loading && acc && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-                  {EXPAND_SECTIONS.map(sec => (
-                    <div key={sec.title} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
-                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>
-                        {sec.title}
-                      </div>
+                <>
+                  {/* Core field sections grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
+                    {/* Identity */}
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>🏷 Identity</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {sec.fields.map(field => {
-                          const rawVal = acc[field];
-                          const display = fmtFieldValue(rawVal);
-                          const isBlank = display === '—';
+                        {[
+                          { label: 'Account Name',    val: acc.name },
+                          { label: 'EHR',             val: acc.ehr },
+                          { label: 'Specialty',       val: acc.specialty },
+                          { label: 'Billing City',    val: acc.billing_city },
+                          { label: 'Billing State',   val: acc.billing_state },
+                          { label: 'Industry',        val: acc.industry },
+                          { label: 'Website',         val: acc.website || acc.domain, isUrl: true },
+                        ].map(({ label, val, isUrl }) => {
+                          const isBlank = !val;
                           return (
-                            <div key={field} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                              <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{field.replace(/_/g, ' ')}</span>
-                              <span style={{ color: isBlank ? C.textMuted : C.textSec, fontSize: 12, wordBreak: 'break-word' }}>{display}</span>
+                            <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                              <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{label}</span>
+                              {isUrl && val
+                                ? <a href={val.startsWith('http') ? val : `https://${val}`} target="_blank" rel="noopener noreferrer" style={{ color: C.accent, fontSize: 12 }}>{val}</a>
+                                : <span style={{ color: isBlank ? C.textMuted : C.textSec, fontSize: 12 }}>{val || '—'}</span>
+                              }
                             </div>
                           );
                         })}
                       </div>
                     </div>
-                  ))}
-                </div>
+
+                    {/* Size & Revenue */}
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>📏 Size &amp; Revenue</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {[
+                          { label: 'Employees',       val: acc.num_employees != null ? acc.num_employees.toLocaleString() : null },
+                          { label: 'Providers',       val: acc.num_providers != null ? acc.num_providers.toLocaleString() : null },
+                          { label: 'Locations',       val: acc.num_locations != null ? acc.num_locations.toLocaleString() : null },
+                          { label: 'Annual Revenue',  val: acc.annual_revenue != null ? fmt(acc.annual_revenue, 'currency') : null },
+                          { label: 'Est. Call Vol',   val: acc.est_monthly_call_volume != null ? acc.est_monthly_call_volume.toLocaleString() + '/mo' : null },
+                        ].map(({ label, val }) => (
+                          <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                            <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{label}</span>
+                            <span style={{ color: val ? C.textSec : C.textMuted, fontSize: 12 }}>{val || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Pipeline */}
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>🔭 Pipeline</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {[
+                          { label: 'Stage',           val: acc.agents_stage },
+                          { label: 'Owner',           val: acc.agents_owner },
+                          { label: 'ICP',             val: acc.agents_icp ? 'Yes ✓' : (acc.agents_icp === false ? 'No' : null) },
+                          { label: 'Campaign Tags',   val: Array.isArray(acc.campaign_tag) ? acc.campaign_tag.join(', ') : acc.campaign_tag },
+                          { label: 'Source Category', val: acc.source_category },
+                          { label: 'DB Status',       val: acc.db_status },
+                          { label: 'Next Step',       val: acc.next_step },
+                          { label: 'Last Touch',      val: acc.last_touch_date ? fmtFieldValue(acc.last_touch_date) : null },
+                        ].map(({ label, val }) => (
+                          <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                            <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{label}</span>
+                            <span style={{ color: val ? C.textSec : C.textMuted, fontSize: 12, wordBreak: 'break-word' }}>{val || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SFDC & Meta */}
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                      <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>☁ SFDC &amp; Meta</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                          <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>SFDC Link</span>
+                          {sfdcUrl
+                            ? <a href={sfdcUrl} target="_blank" rel="noopener noreferrer" style={{ color: C.blue, fontSize: 12 }}>Open Account ↗</a>
+                            : <span style={{ color: C.textMuted, fontSize: 12 }}>—</span>
+                          }
+                        </div>
+                        {[
+                          { label: 'SFDC ID',         val: acc.sfdc_id },
+                          { label: 'SFDC Name',       val: acc.sfdc_account_name },
+                          { label: 'ROE Flag',        val: Array.isArray(acc.potential_roe_issue) && acc.potential_roe_issue.length ? acc.potential_roe_issue.join(', ') : null },
+                          { label: 'ROE Notes',       val: acc.roe_flag_notes },
+                          { label: 'Enrichment',      val: acc.enrichment_notes },
+                          { label: 'Created',         val: acc.created_at ? fmtFieldValue(acc.created_at) : null },
+                          { label: 'Updated',         val: acc.updated_at ? fmtFieldValue(acc.updated_at) : null },
+                        ].map(({ label, val }) => (
+                          <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                            <span style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3px', minWidth: 110, paddingTop: 1, flexShrink: 0 }}>{label}</span>
+                            <span style={{ color: val ? C.textSec : C.textMuted, fontSize: 12, wordBreak: 'break-word' }}>{val || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Top Contacts */}
+                  <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+                    <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>
+                      👤 Top Contacts
+                      <span style={{ color: C.textMuted, fontWeight: 400, marginLeft: 6 }}>({contacts.length} found)</span>
+                    </div>
+                    {contacts.length === 0 ? (
+                      <div style={{ color: C.textMuted, fontSize: 12 }}>No contacts linked to this account.</div>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              {['Name','Title','Phone','Email','Target'].map(h => (
+                                <th key={h} style={{ padding: '5px 10px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', background: C.surface }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {contacts.map((ct, ci) => (
+                              <tr key={ci} style={{ background: ci % 2 === 0 ? 'transparent' : C.surface + '55' }}>
+                                <td style={{ padding: '5px 10px', color: C.textPri, fontWeight: 500 }}>{ct.full_name || '—'}</td>
+                                <td style={{ padding: '5px 10px', color: C.textSec }}>{ct.title || '—'}</td>
+                                <td style={{ padding: '5px 10px', color: C.textSec }}>{ct.phone || '—'}</td>
+                                <td style={{ padding: '5px 10px' }}>
+                                  {ct.email
+                                    ? <a href={`mailto:${ct.email}`} style={{ color: C.accent, fontSize: 11 }}>{ct.email}</a>
+                                    : <span style={{ color: C.textMuted }}>—</span>
+                                  }
+                                </td>
+                                <td style={{ padding: '5px 10px', textAlign: 'center' }}>
+                                  {ct.target_persona
+                                    ? <span style={{ color: C.green, fontSize: 11, fontWeight: 700 }}>✓</span>
+                                    : <span style={{ color: C.textMuted }}>—</span>
+                                  }
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
 
               {!loading && !acc && (
@@ -3311,6 +3453,17 @@ function TeamsSettings() {
     try { return JSON.parse(localStorage.getItem('wt_agents_team_sfdc_ids') || '[]'); } catch { return []; }
   });
 
+  // Load cached SFDC users from localStorage on mount
+  useEffect(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem('wt_sfdc_users_cache') || '[]');
+      if (cached.length > 0) {
+        setSfdcUsers(cached);
+        setSfdcSynced(true);
+      }
+    } catch {}
+  }, []);
+
   function toggleAgentsTeam(sfdc_id) {
     setAgentsTeamIds(prev => {
       const next = prev.includes(sfdc_id)
@@ -3512,6 +3665,127 @@ function TeamsSettings() {
           </div>
         </>
       )}
+
+      {/* ── SFDC User Hierarchy ─────────────────────────────────────────── */}
+      <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ color: C.textPri, fontWeight: 700, fontSize: 14, marginBottom: 3 }}>☁ SFDC User Hierarchy</div>
+            <div style={{ color: C.textMuted, fontSize: 12 }}>
+              Sync active Salesforce users and assign them to the Agents Team.
+              {sfdcSynced && <span style={{ color: C.green, marginLeft: 8 }}>✓ Synced ({sfdcUsers.length} users)</span>}
+            </div>
+          </div>
+          <button
+            onClick={syncSfdcUsers}
+            disabled={sfdcLoading}
+            style={{
+              background: sfdcLoading ? C.surface : C.accent + '22',
+              color: sfdcLoading ? C.textMuted : C.accent,
+              border: `1px solid ${sfdcLoading ? C.border : C.accent + '66'}`,
+              borderRadius: 8, padding: '7px 16px', fontSize: 12, fontWeight: 700,
+              cursor: sfdcLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            {sfdcLoading ? '⟳ Syncing…' : '🔄 Sync SFDC Users'}
+          </button>
+        </div>
+
+        {sfdcError && (
+          <div style={{ background: C.red + '15', border: `1px solid ${C.red}44`, borderRadius: 8, padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12 }}>
+            ⚠ Sync failed: {sfdcError}
+          </div>
+        )}
+
+        {sfdcUsers.length > 0 && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ color: C.textSec, fontSize: 12 }}>
+                Check users to assign to <strong style={{ color: C.accent }}>Agents Team</strong>
+              </span>
+              <span style={{ color: C.textMuted, fontSize: 11 }}>
+                {agentsTeamIds.length} selected
+              </span>
+              {agentsTeamIds.length > 0 && (
+                <button
+                  onClick={() => {
+                    setAgentsTeamIds([]);
+                    try { localStorage.removeItem('wt_agents_team_sfdc_ids'); } catch {}
+                  }}
+                  style={{ background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', fontSize: 11 }}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', maxHeight: 420, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: '7px 12px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, width: 40 }}>✓</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Name</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Username</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Title</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Dept</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sfdcUsers.map((u, i) => {
+                    const uid = u.Id;
+                    const isAssigned = agentsTeamIds.includes(uid);
+                    return (
+                      <tr
+                        key={uid || i}
+                        onClick={() => toggleAgentsTeam(uid)}
+                        style={{
+                          cursor: 'pointer',
+                          background: isAssigned ? C.accent + '15' : (i % 2 === 0 ? 'transparent' : C.card + '44'),
+                          transition: 'background 0.1s',
+                        }}
+                        onMouseEnter={e => { if (!isAssigned) e.currentTarget.style.background = C.cardHover; }}
+                        onMouseLeave={e => { if (!isAssigned) e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : C.card + '44'; }}
+                      >
+                        <td style={{ padding: '6px 12px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={isAssigned}
+                            onChange={() => toggleAgentsTeam(uid)}
+                            onClick={e => e.stopPropagation()}
+                            style={{ accentColor: C.accent, cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ padding: '6px 12px', color: isAssigned ? C.textPri : C.textSec, fontWeight: isAssigned ? 600 : 400, borderBottom: `1px solid ${C.border}1a` }}>
+                          {u.Name || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', color: C.textMuted, fontSize: 11, borderBottom: `1px solid ${C.border}1a` }}>
+                          {u.Username || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', color: C.textMuted, borderBottom: `1px solid ${C.border}1a` }}>
+                          {u.Title || '—'}
+                        </td>
+                        <td style={{ padding: '6px 12px', color: C.textMuted, borderBottom: `1px solid ${C.border}1a` }}>
+                          {u.Department || '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {agentsTeamIds.length > 0 && (
+              <div style={{ marginTop: 10, color: C.green, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>✓ {agentsTeamIds.length} user{agentsTeamIds.length !== 1 ? 's' : ''} saved to Agents Team (localStorage)</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!sfdcSynced && sfdcUsers.length === 0 && !sfdcLoading && (
+          <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
+            Click "Sync SFDC Users" to load the user directory from Salesforce.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
