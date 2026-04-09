@@ -202,7 +202,7 @@ export default async function handler(req, res) {
       byProviderBucket:  toBObj(globalProvBucketRes.rows),
       notRcmCount:       0,
       roeCount:          0,
-      confirmedIcpCount: globalTotal,
+      confirmedIcpCount: parseInt((await query(`SELECT COUNT(*) FROM accounts ${BASE_WHERE} AND agents_icp = TRUE`)).rows[0].count, 10),
     };
 
     // ── 3. Filtered aggregations ───────────────────────────────────────────
