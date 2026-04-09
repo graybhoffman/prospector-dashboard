@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     extraFilter = `AND (a.type = 'meeting' OR LOWER(a.subject) LIKE '%disco%' OR LOWER(a.subject) LIKE '%discovery%' OR LOWER(a.subject) LIKE '%set%')`;
   } else if (type === 'connects') {
     typeFilter = `AND a.type = 'call'`;
-    extraFilter = `AND (LOWER(a.outcome) LIKE '%connect%' OR LOWER(a.outcome) LIKE '%answer%' OR LOWER(a.outcome) LIKE '%spoke%')`;
+    extraFilter = `AND (LOWER(a.outcome) LIKE '%connect%' OR LOWER(a.outcome) LIKE 'answer%' OR LOWER(a.outcome) LIKE '%spoke%') AND LOWER(a.outcome) NOT LIKE '%no answer%' AND LOWER(a.outcome) NOT LIKE 'no_%' AND LOWER(a.outcome) NOT LIKE 'did not%'`;
   } else if (type && type !== 'all') {
     typeFilter = `AND a.type = $${params.length + 1}`;
     params.push(type);

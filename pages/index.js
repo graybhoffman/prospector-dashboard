@@ -3869,6 +3869,12 @@ function fmtTime(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
   if (isNaN(d)) return '—';
+  // SFDC Task ActivityDate has no time component — stored as midnight UTC.
+  // Detect that and show the date instead of a misleading "17:00" (PDT offset).
+  const utcH = d.getUTCHours(), utcM = d.getUTCMinutes(), utcS = d.getUTCSeconds();
+  if (utcH === 0 && utcM === 0 && utcS === 0) {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
