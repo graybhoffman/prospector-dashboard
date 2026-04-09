@@ -3350,11 +3350,26 @@ function TeamsSettings() {
 }
 
 // ─── Collapsible Dashboard Section ───────────────────────────────────────────
-function DashSection({ title, defaultOpen = true, accent = '#6366f1', children }) {
-  const [open, setOpen] = useState(defaultOpen);
+function DashSection({ title, defaultOpen = true, accent = '#6366f1', storageKey = null, children }) {
+  const [open, setOpen] = useState(() => {
+    if (storageKey && typeof window !== 'undefined') {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) return saved === 'true';
+    }
+    return defaultOpen;
+  });
+
+  function toggle() {
+    setOpen(o => {
+      const next = !o;
+      if (storageKey && typeof window !== 'undefined') localStorage.setItem(storageKey, String(next));
+      return next;
+    });
+  }
+
   return (
     <div style={{ marginBottom: 16, border: `1px solid ${C.border}`, borderLeftColor: accent, borderLeftWidth: 3, borderRadius: '0 10px 10px 0', background: C.card, overflow: 'hidden' }}>
-      <button onClick={() => setOpen(o => !o)} style={{
+      <button onClick={toggle} style={{
         width: '100%', background: 'transparent', border: 'none',
         padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         cursor: 'pointer', borderBottom: open ? `1px solid ${C.border}` : 'none',
@@ -3942,7 +3957,7 @@ function ActivityDashboard() {
       </DashSection>
 
       {/* ── Section 4 — Activity Trends ── */}
-      <DashSection title="📈 Activity Trends" accent={C.green} defaultOpen={false}>
+      <DashSection title="📈 Trends" accent={C.green} defaultOpen={true} storageKey="wt_show_trends">
         <ActivityTrendCharts />
       </DashSection>
     </div>
