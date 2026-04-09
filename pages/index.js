@@ -61,7 +61,8 @@ const PIPELINE_STAGES = [
 
 // Default filter excludes Prospects
 const NON_PROSPECT_STAGES = PIPELINE_STAGES.filter((s) => s !== 'Prospect');
-const DEFAULT_PIPELINE_FILTERS = { stage: NON_PROSPECT_STAGES };
+// Default filter: show all stages (empty = no filter)
+const DEFAULT_PIPELINE_FILTERS = { stage: [] };
 
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
@@ -593,17 +594,26 @@ function MarketSummarySection({ globals, statsLoading, title = '📊 Market Summ
 }
 
 // ─── Stage Funnel ─────────────────────────────────────────────────────────────
-function StageFunnel({ byStage, onStageClick, selectedStage }) {
+function StageFunnel({ byStage, onStageClick, selectedStage, activeStages }) {
   if (!byStage) return null;
 
   const stages = PIPELINE_STAGES;
   const counts  = stages.map((s) => byStage[s] || 0);
   const maxCount = Math.max(...counts, 1);
   const isClickable = !!onStageClick;
+  // Support both single-select (selectedStage) and multi-select (activeStages Set)
+  const isStageSelected = (stage) =>
+    (activeStages && activeStages.size > 0) ? activeStages.has(stage) : selectedStage === stage;
 
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>Stage Funnel{isClickable && <span style={{ marginLeft: 6, fontWeight: 400 }}>· click to filter</span>}</div>
+      <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>
+        Stage Funnel
+        {isClickable && <span style={{ marginLeft: 6, fontWeight: 400 }}>· click to filter · multi-select supported</span>}
+        {activeStages && activeStages.size > 0 && (
+          <span style={{ color: C.accent, marginLeft: 8, fontWeight: 600 }}>{activeStages.size} selected</span>
+        )}
+      </div>
       <div style={{ overflowX: 'auto' }}>
         <div style={{ display: 'flex', gap: 4, minWidth: 600, alignItems: 'flex-end' }}>
           {stages.map((stage, i) => {
@@ -612,7 +622,7 @@ function StageFunnel({ byStage, onStageClick, selectedStage }) {
             const convRate = prev != null && prev > 0 ? Math.round((count / prev) * 100) : null;
             const height = maxCount > 0 ? Math.max(32, Math.round((count / maxCount) * 120)) : 32;
             const isActive = ACTIVE_STAGES.has(stage);
-            const isSelected = selectedStage === stage;
+            const isSelected = isStageSelected(stage);
             return (
               <div
                 key={stage}
@@ -1248,24 +1258,36 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
   const records     = pipelineData?.records;
   const meta        = pipelineData?.meta;
 
-  // StageFunnel click → toggle single-stage filter (Change 7)
+  // StageFunnel click → toggle stage in/out of filter
+  // If only stage selected is clicked → clear to [] (show all including prospects)
+  // If stage not selected → add it (multi-select on funnel)
   const handleStageClick = (stage) => {
     setFilters((f) => {
       const cur = f.stage || [];
-      if (cur.length === 1 && cur[0] === stage) return { ...f, stage: NON_PROSPECT_STAGES };
-      return { ...f, stage: [stage] };
+      if (cur.includes(stage)) {
+        // Deselect: remove this stage; if now empty, show all
+        const next = cur.filter((s) => s !== stage);
+        return { ...f, stage: next };
+      } else {
+        // Select: if nothing was selected (showing all), start with just this stage
+        // otherwise add to existing multi-select
+        return { ...f, stage: cur.length === 0 ? [stage] : [...cur, stage] };
+      }
     });
   };
+  // Highlight any stage that is the ONLY selected or is in the multi-select
   const selectedFunnelStage = (filters.stage?.length === 1) ? filters.stage[0] : null;
+  const activeFunnelStages  = new Set(filters.stage || []);
 
   return (
     <Section id="pipeline" title="🔭 Pipeline Tracking" accent={SECTION_ACCENT.pipeline}>
-      {/* Stage Funnel — clickable (Change 7) */}
+      {/* Stage Funnel — clickable, multi-select */}
       {agg && (
         <StageFunnel
           byStage={agg.byStage}
           onStageClick={handleStageClick}
           selectedStage={selectedFunnelStage}
+          activeStages={activeFunnelStages}
         />
       )}
 
