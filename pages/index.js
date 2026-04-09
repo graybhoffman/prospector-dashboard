@@ -4110,17 +4110,17 @@ function AccountsDataTab() {
     },
   ];
 
-  const [showQueue, setShowQueue] = React.useState(false);
-  const [queueCount, setQueueCount] = React.useState(null);
+  const [showQueue, setShowQueue] = useState(false);
+  const [queueCount, setQueueCount] = useState(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetch('/api/accounts?queue=enrichment&limit=1&page=1')
       .then(r => r.json())
       .then(data => setQueueCount(data.total || 0))
       .catch(() => setQueueCount(0));
   }, []);
 
-  const handlePromote = React.useCallback(async (accountId) => {
+  const handlePromote = useCallback(async (accountId) => {
     try {
       await fetch('/api/accounts', {
         method: 'PATCH',
@@ -4130,7 +4130,7 @@ function AccountsDataTab() {
     } catch (e) { console.error(e); }
   }, []);
 
-  const queueColumns = React.useMemo(() => [
+  const queueColumns = useMemo(() => [
     ...columns,
     {
       key: 'promote', label: '', width: 100, filterable: false, sortable: false,

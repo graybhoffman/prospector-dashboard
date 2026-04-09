@@ -246,8 +246,9 @@ export default async function handler(req, res) {
     const limitPH  = `$${params.length + 1}`;
     const offsetPH = `$${params.length + 2}`;
 
+    // Use DISTINCT ON (sfdc_id, name) to prevent duplicate rows from appearing
     const recordsRes = await query(
-      `SELECT * FROM accounts ${FILTER_WHERE} ORDER BY name ASC LIMIT ${limitPH} OFFSET ${offsetPH}`,
+      `SELECT DISTINCT ON (COALESCE(sfdc_id, id::text)) * FROM accounts ${FILTER_WHERE} ORDER BY COALESCE(sfdc_id, id::text), name ASC LIMIT ${limitPH} OFFSET ${offsetPH}`,
       recordsParams,
     );
 
