@@ -3841,20 +3841,28 @@ function TrendChartSet({ data, callsTarget, connectsTarget, setsTarget }) {
 }
 
 function ActivityTrendCharts() {
-  // Build placeholder trend data (zeros until SFDC sync is active)
-  const dailyData  = Array.from({ length: 14 }, (_, i) => {
+  const { data: dailyRes  } = useSWR('/api/activity-stats?window=day-14',  fetcher, { revalidateOnFocus: false });
+  const { data: weeklyRes } = useSWR('/api/activity-stats?window=week-8',  fetcher, { revalidateOnFocus: false });
+  const { data: monthlyRes} = useSWR('/api/activity-stats?window=month-6', fetcher, { revalidateOnFocus: false });
+
+  // Fallback placeholders while loading
+  const emptyDaily  = Array.from({ length: 14 }, (_, i) => {
     const date = new Date(); date.setDate(date.getDate() - (13 - i));
     return { label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
   });
-  const weeklyData = Array.from({ length: 8 }, (_, i) => {
+  const emptyWeekly = Array.from({ length: 8 }, (_, i) => {
     const date = new Date(); date.setDate(date.getDate() - (7 - i) * 7);
     const mon = new Date(date); mon.setDate(date.getDate() - ((date.getDay() + 6) % 7));
     return { label: `Wk ${mon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
   });
-  const monthlyData = Array.from({ length: 6 }, (_, i) => {
+  const emptyMonthly = Array.from({ length: 6 }, (_, i) => {
     const date = new Date(); date.setMonth(date.getMonth() - (5 - i));
     return { label: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), calls: 0, connects: 0, contacts: 0, accounts: 0, sets: 0 };
   });
+
+  const dailyData  = dailyRes?.trend  || emptyDaily;
+  const weeklyData = weeklyRes?.trend || emptyWeekly;
+  const monthlyData= monthlyRes?.trend|| emptyMonthly;
 
   return (
     <div>

@@ -77,7 +77,7 @@ export default async function handler(req, res) {
         };
       }
 
-      if (['day-14', 'week-4', 'month-4'].includes(win)) {
+      if (['day-14', 'week-4', 'week-8', 'month-4', 'month-6'].includes(win)) {
         result.trend = buildEmptyTrend(win);
       }
 
@@ -160,6 +160,39 @@ export default async function handler(req, res) {
         const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
         trend.push({
           label: start.toLocaleDateString('en-US', { month: 'short' }),
+          ...s,
+        });
+      }
+      return res.status(200).json({ isLive: true, window: win, stats: trend[trend.length - 1] || EMPTY_STATS, trend });
+    }
+
+    if (win === 'week-8') {
+      const trend = [];
+      for (let i = 7; i >= 0; i--) {
+        const monday = new Date(now);
+        const dayOfWeek = now.getDay();
+        monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7) - i * 7);
+        monday.setHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        sunday.setHours(23, 59, 59, 999);
+        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10));
+        trend.push({
+          label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+          ...s,
+        });
+      }
+      return res.status(200).json({ isLive: true, window: win, stats: trend[trend.length - 1] || EMPTY_STATS, trend });
+    }
+
+    if (win === 'month-6') {
+      const trend = [];
+      for (let i = 5; i >= 0; i--) {
+        const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+        trend.push({
+          label: start.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
           ...s,
         });
       }
