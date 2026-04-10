@@ -4388,6 +4388,11 @@ function ActivityDashboard() {
   const agentsToday = agentsTodayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
   const agentsWeek  = agentsWeekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
 
+  // "This Week" section: prefer agents-team filtered data when team is configured
+  const displayWeek     = hasAgentsTeam ? agentsWeek     : week;
+  const displayWeekData = hasAgentsTeam ? agentsWeekData : weekData;
+  const displayWeekLoading = hasAgentsTeam ? agentsWeekLoading : weekLoading;
+
   const isLive = todayData?.isLive ?? false;
   const liveNote = !isLive ? 'Live once SFDC sync active' : null;
 
@@ -4463,12 +4468,17 @@ function ActivityDashboard() {
 
       {/* ── Section 3 — This Week's Stats ── */}
       <DashSection title={`📅 This Week's Stats — ${getWeekRange()}`} accent={C.teal}>
+        {hasAgentsTeam && (
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
+            Filtering for: {agentsTeamUserNames.join(', ')}
+          </div>
+        )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}              target={200} loading={weekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={week.connects}           target={20}  loading={weekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={week.contactsContacted}  target={null} loading={weekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={week.accountsContacted}  target={null} loading={weekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="📅" label="Sets"                value={week.sets}               target={5}   loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={displayWeek.calls}              target={200} loading={displayWeekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={displayWeek.connects}           target={20}  loading={displayWeekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={displayWeek.contactsContacted}  target={null} loading={displayWeekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={displayWeek.accountsContacted}  target={null} loading={displayWeekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={displayWeek.sets}               target={5}   loading={displayWeekLoading} note={liveNote} />
         </div>
         {/* Daily breakdown table */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
@@ -4497,11 +4507,11 @@ function ActivityDashboard() {
                   </td>
                   {['mon', 'tue', 'wed', 'thu', 'fri'].map(day => (
                     <td key={day} style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
-                      {weekData?.daily?.[day]?.[metric.key] ?? '—'}
+                      {displayWeekData?.daily?.[day]?.[metric.key] ?? '—'}
                     </td>
                   ))}
                   <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.teal, fontWeight: 700, fontSize: 12 }}>
-                    {week[metric.key] || '—'}
+                    {displayWeek[metric.key] || '—'}
                   </td>
                 </tr>
               ))}
