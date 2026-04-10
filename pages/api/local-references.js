@@ -189,7 +189,7 @@ export default async function handler(req, res) {
       WHERE StageName = 'Closed Won'
         AND ${stateFilter}${cityFilter}
         AND Amount > 0
-        AND NOT Account.Name LIKE '%TERMINATED%'
+        AND Account.Name NOT LIKE '%TERMINATED%'
       ORDER BY Amount DESC, CloseDate DESC
       LIMIT 20
     `.replace(/\s+/g, ' ').trim();
