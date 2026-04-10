@@ -31,9 +31,9 @@ export default async function handler(req, res) {
   const params = [];
 
   if (win === 'today' || date === 'today') {
-    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'UTC') = CURRENT_DATE`;
+    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date`;
   } else if (date) {
-    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'UTC') = $1`;
+    dateFilter = `AND DATE(a.activity_date AT TIME ZONE 'America/Los_Angeles') = $1`;
     params.push(date);
   }
 

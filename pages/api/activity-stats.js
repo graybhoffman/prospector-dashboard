@@ -86,7 +86,9 @@ export default async function handler(req, res) {
 
     // ── Live queries ────────────────────────────────────────────────────────
     // Determine date range
-    const now = new Date();
+    // Use PT date for all calculations to avoid UTC-midnight rollover issues
+    const ptDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const now = new Date(ptDateStr + 'T12:00:00');
 
     if (win === 'today') {
       const stats = await getStats('today', null, null, teamUserNames);
@@ -216,11 +218,11 @@ async function getStatsForDate(dateStr, teamUserNames) {
 async function getStats(mode, start, end, teamUserNames) {
   let dateClause;
   if (mode === 'today') {
-    dateClause = `DATE(activity_date AT TIME ZONE 'UTC') = CURRENT_DATE`;
+    dateClause = `DATE(activity_date AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date`;
   } else if (mode === 'date') {
-    dateClause = `DATE(activity_date AT TIME ZONE 'UTC') = '${start}'`;
+    dateClause = `DATE(activity_date AT TIME ZONE 'America/Los_Angeles') = '${start}'`;
   } else {
-    dateClause = `DATE(activity_date AT TIME ZONE 'UTC') BETWEEN '${start}' AND '${end}'`;
+    dateClause = `DATE(activity_date AT TIME ZONE 'America/Los_Angeles') BETWEEN '${start}' AND '${end}'`;
   }
 
   // Build team filter
