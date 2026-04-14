@@ -4526,9 +4526,9 @@ function TrendChartSet({ data, callsTarget, connectsTarget, setsTarget }) {
 }
 
 function ActivityTrendCharts() {
-  const { data: dailyRes  } = useSWR('/api/activity-stats?window=day-14',  fetcher, { revalidateOnFocus: false });
-  const { data: weeklyRes } = useSWR('/api/activity-stats?window=week-8',  fetcher, { revalidateOnFocus: false });
-  const { data: monthlyRes} = useSWR('/api/activity-stats?window=month-6', fetcher, { revalidateOnFocus: false });
+  const { data: dailyRes  } = useSWR('/api/outreach-activity-stats?window=day-14',  fetcher, { revalidateOnFocus: false });
+  const { data: weeklyRes } = useSWR('/api/outreach-activity-stats?window=week-8',  fetcher, { revalidateOnFocus: false });
+  const { data: monthlyRes} = useSWR('/api/outreach-activity-stats?window=month-6', fetcher, { revalidateOnFocus: false });
 
   // Fallback placeholders while loading
   const emptyDaily  = Array.from({ length: 14 }, (_, i) => {

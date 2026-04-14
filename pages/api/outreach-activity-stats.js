@@ -124,7 +124,46 @@ export default async function handler(req, res) {
       return res.status(200).json({ isLive: true, window: 'date', date, stats, teamUserIds: AGENTS_TEAM_USER_IDS });
     }
 
-    return res.status(400).json({ error: 'Provide window=today or date=YYYY-MM-DD' });
+    // ── Trend windows: day-14, week-8, month-6 ──────────────────────────────
+    if (win === 'day-14') {
+      const trend = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = d.toISOString().slice(0, 10);
+        const ptStart = new Date(ds + 'T07:00:00.000Z');
+        const s = await getStatsForRange(ptStart.toISOString(), new Date(ptStart.getTime() + 86400000).toISOString(), token);
+        trend.push({ label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), ...s, contacts: s.contactsContacted, accounts: s.accountsContacted });
+      }
+      return res.status(200).json({ isLive: true, window: win, trend, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    if (win === 'week-8') {
+      const trend = [];
+      for (let i = 7; i >= 0; i--) {
+        const monday = new Date(); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - i * 7);
+        const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+        const startISO = new Date(monday.toISOString().slice(0, 10) + 'T07:00:00.000Z').toISOString();
+        const endISO   = new Date(sunday.toISOString().slice(0, 10) + 'T06:59:59.999Z').toISOString();
+        const s = await getStatsForRange(startISO, endISO, token);
+        trend.push({ label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, ...s, contacts: s.contactsContacted, accounts: s.accountsContacted });
+      }
+      return res.status(200).json({ isLive: true, window: win, trend, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    if (win === 'month-6') {
+      const trend = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(); d.setMonth(d.getMonth() - i);
+        const year = d.getFullYear(); const month = d.getMonth();
+        const startISO = new Date(year, month, 1, 7, 0, 0).toISOString();
+        const endISO   = new Date(year, month + 1, 0, 6, 59, 59).toISOString();
+        const s = await getStatsForRange(startISO, endISO, token);
+        trend.push({ label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), ...s, contacts: s.contactsContacted, accounts: s.accountsContacted });
+      }
+      return res.status(200).json({ isLive: true, window: win, trend, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    return res.status(400).json({ error: 'Provide window=today|week|day-14|week-8|month-6 or date=YYYY-MM-DD' });
   } catch (err) {
     console.error('[outreach-activity-stats]', err.message);
     return res.status(200).json({ isLive: false, window: win, stats: { ...EMPTY_STATS }, error: err.message });
