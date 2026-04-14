@@ -3125,7 +3125,7 @@ function ManageTab() {
                             : <span style={S.muted}>—</span>}
                         </td>
                         <td style={S.td(i)}>
-                          {(a.sfdc_link || a.sfdc_id) ? <a href={a.sfdc_link || \`https://athelas.lightning.force.com/lightning/r/Account/\${a.sfdc_id}/view\`} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', fontSize: 11 }}>↗ SFDC</a> : <span style={S.muted}>—</span>}
+                          {(a.sfdc_link || a.sfdc_id) ? <a href={a.sfdc_link || ('https://athelas.lightning.force.com/lightning/r/Account/' + a.sfdc_id + '/view')} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', fontSize: 11 }}>↗ SFDC</a> : <span style={S.muted}>—</span>}
                         </td>
                       </tr>
                     );
