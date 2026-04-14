@@ -3493,6 +3493,15 @@ function TeamsSettings() {
     if (typeof window === 'undefined') return [];
     try { return JSON.parse(localStorage.getItem('wt_agents_team_sfdc_ids') || '[]'); } catch { return []; }
   });
+  // ── "Add to Team" UX state ────────────────────────────────────────────────
+  const [addTargetTeamId, setAddTargetTeamId] = useState('');
+  const [addingUserId,    setAddingUserId]    = useState(null); // SFDC user ID being added
+  const [addMsg,          setAddMsg]          = useState('');
+  // ── Import from Outreach state ────────────────────────────────────────────
+  const [outreachUsers,   setOutreachUsers]   = useState([]);
+  const [outreachLoading, setOutreachLoading] = useState(false);
+  const [outreachError,   setOutreachError]   = useState(null);
+  const [outreachLoaded,  setOutreachLoaded]  = useState(false);
 
   // Load cached SFDC users from localStorage on mount
   useEffect(() => {
@@ -3530,6 +3539,52 @@ function TeamsSettings() {
       setSfdcError(e.message);
     } finally {
       setSfdcLoading(false);
+    }
+  }
+
+  // ── Add SFDC/Outreach user to a team by name ──────────────────────────────
+  async function addUserToTeam(userName, teamId) {
+    if (!teamId) { setAddMsg('Select a team first'); setTimeout(() => setAddMsg(''), 3000); return; }
+    const team = teams.find(t => String(t.id) === String(teamId));
+    if (!team) return;
+    if ((team.user_names || []).includes(userName)) {
+      setAddMsg(`${userName} is already in ${team.name}`);
+      setTimeout(() => setAddMsg(''), 3000);
+      return;
+    }
+    setAddingUserId(userName);
+    try {
+      const updated = { ...team, user_names: [...(team.user_names || []), userName] };
+      const r = await fetch(`/api/teams/${teamId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_names: updated.user_names }),
+      });
+      if (!r.ok) throw new Error('Failed to update team');
+      mutate();
+      setAddMsg(`✓ Added ${userName} to ${team.name}`);
+      setTimeout(() => setAddMsg(''), 3000);
+    } catch (e) {
+      setAddMsg('Error: ' + e.message);
+      setTimeout(() => setAddMsg(''), 4000);
+    } finally {
+      setAddingUserId(null);
+    }
+  }
+
+  // ── Import from Outreach ──────────────────────────────────────────────────
+  async function loadOutreachUsers() {
+    setOutreachLoading(true);
+    setOutreachError(null);
+    try {
+      const r = await fetch('/api/outreach-users');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to load Outreach users');
+      setOutreachUsers(d.users || []);
+      setOutreachLoaded(true);
+    } catch (e) {
+      setOutreachError(e.message);
+    } finally {
+      setOutreachLoading(false);
     }
   }
 
@@ -3738,14 +3793,40 @@ function TeamsSettings() {
           </div>
         )}
 
+        {/* ── Team selector for "Add to Team" ── */}
+        {teams.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+            <span style={{ color: C.textMuted, fontSize: 12 }}>Add to team:</span>
+            <select
+              value={addTargetTeamId}
+              onChange={e => setAddTargetTeamId(e.target.value)}
+              style={{
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+                color: addTargetTeamId ? C.textPri : C.textMuted,
+                padding: '5px 10px', fontSize: 12, outline: 'none', cursor: 'pointer',
+              }}
+            >
+              <option value="">— Select team —</option>
+              {teams.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            {addMsg && (
+              <span style={{ color: addMsg.startsWith('✓') ? C.green : C.red, fontSize: 12 }}>
+                {addMsg}
+              </span>
+            )}
+          </div>
+        )}
+
         {sfdcUsers.length > 0 && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <span style={{ color: C.textSec, fontSize: 12 }}>
-                Check users to assign to <strong style={{ color: C.accent }}>Agents Team</strong>
+                Check users to track · or click <strong style={{ color: C.accent }}>Add to Team →</strong> to add to a team
               </span>
               <span style={{ color: C.textMuted, fontSize: 11 }}>
-                {agentsTeamIds.length} selected
+                {agentsTeamIds.length} tracked
               </span>
               {agentsTeamIds.length > 0 && (
                 <button
@@ -3765,15 +3846,16 @@ function TeamsSettings() {
                   <tr>
                     <th style={{ padding: '7px 12px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, width: 40 }}>✓</th>
                     <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Name</th>
-                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Username</th>
                     <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Title</th>
                     <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Dept</th>
+                    <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, width: 130 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {sfdcUsers.map((u, i) => {
                     const uid = u.Id;
                     const isAssigned = agentsTeamIds.includes(uid);
+                    const isAdding = addingUserId === u.Name;
                     return (
                       <tr
                         key={uid || i}
@@ -3798,14 +3880,28 @@ function TeamsSettings() {
                         <td style={{ padding: '6px 12px', color: isAssigned ? C.textPri : C.textSec, fontWeight: isAssigned ? 600 : 400, borderBottom: `1px solid ${C.border}1a` }}>
                           {u.Name || '—'}
                         </td>
-                        <td style={{ padding: '6px 12px', color: C.textMuted, fontSize: 11, borderBottom: `1px solid ${C.border}1a` }}>
-                          {u.Username || '—'}
-                        </td>
                         <td style={{ padding: '6px 12px', color: C.textMuted, borderBottom: `1px solid ${C.border}1a` }}>
                           {u.Title || '—'}
                         </td>
                         <td style={{ padding: '6px 12px', color: C.textMuted, borderBottom: `1px solid ${C.border}1a` }}>
                           {u.Department || '—'}
+                        </td>
+                        <td style={{ padding: '6px 8px', borderBottom: `1px solid ${C.border}1a` }}
+                          onClick={e => e.stopPropagation()}>
+                          {addTargetTeamId && u.Name && (
+                            <button
+                              onClick={() => addUserToTeam(u.Name, addTargetTeamId)}
+                              disabled={isAdding}
+                              style={{
+                                background: C.green + '22', color: C.green,
+                                border: `1px solid ${C.green}44`, borderRadius: 5,
+                                padding: '2px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                                whiteSpace: 'nowrap', opacity: isAdding ? 0.5 : 1,
+                              }}
+                            >
+                              {isAdding ? '…' : 'Add to Team →'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -3815,7 +3911,7 @@ function TeamsSettings() {
             </div>
             {agentsTeamIds.length > 0 && (
               <div style={{ marginTop: 10, color: C.green, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>✓ {agentsTeamIds.length} user{agentsTeamIds.length !== 1 ? 's' : ''} saved to Agents Team (localStorage)</span>
+                <span>✓ {agentsTeamIds.length} user{agentsTeamIds.length !== 1 ? 's' : ''} tracked (localStorage)</span>
               </div>
             )}
           </div>
@@ -3824,6 +3920,88 @@ function TeamsSettings() {
         {!sfdcSynced && sfdcUsers.length === 0 && !sfdcLoading && (
           <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
             Click "Sync SFDC Users" to load the user directory from Salesforce.
+          </div>
+        )}
+      </div>
+
+      {/* ── Import from Outreach ─────────────────────────────────────────── */}
+      <div style={{ marginTop: 24, borderTop: `1px solid ${C.border}`, paddingTop: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ color: C.textPri, fontWeight: 700, fontSize: 14, marginBottom: 3 }}>📥 Import from Outreach</div>
+            <div style={{ color: C.textMuted, fontSize: 12 }}>
+              Fetch active Outreach users and add them to a team.
+              {outreachLoaded && <span style={{ color: C.green, marginLeft: 8 }}>✓ Loaded ({outreachUsers.length} users)</span>}
+            </div>
+          </div>
+          <button
+            onClick={loadOutreachUsers}
+            disabled={outreachLoading}
+            style={{
+              background: outreachLoading ? C.surface : C.teal + '22',
+              color: outreachLoading ? C.textMuted : C.teal,
+              border: `1px solid ${outreachLoading ? C.border : C.teal + '66'}`,
+              borderRadius: 8, padding: '7px 16px', fontSize: 12, fontWeight: 700,
+              cursor: outreachLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            {outreachLoading ? '⟳ Loading…' : '📥 Import from Outreach'}
+          </button>
+        </div>
+
+        {outreachError && (
+          <div style={{ background: C.red + '15', border: `1px solid ${C.red}44`, borderRadius: 8, padding: '10px 14px', color: C.red, fontSize: 12, marginBottom: 12 }}>
+            ⚠ Failed: {outreachError}
+          </div>
+        )}
+
+        {outreachLoaded && outreachUsers.length > 0 && (
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden', maxHeight: 320, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Name</th>
+                  <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Email</th>
+                  <th style={{ padding: '7px 12px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, background: C.card, width: 130 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {outreachUsers.map((u, i) => {
+                  const isAdding = addingUserId === u.name;
+                  return (
+                    <tr key={u.id || i} style={{ background: i % 2 === 0 ? 'transparent' : C.card + '44' }}>
+                      <td style={{ padding: '6px 12px', color: C.textSec, fontWeight: 500, borderBottom: `1px solid ${C.border}1a` }}>{u.name}</td>
+                      <td style={{ padding: '6px 12px', color: C.textMuted, fontSize: 11, borderBottom: `1px solid ${C.border}1a` }}>{u.email || '—'}</td>
+                      <td style={{ padding: '6px 8px', borderBottom: `1px solid ${C.border}1a` }}>
+                        {addTargetTeamId && u.name && (
+                          <button
+                            onClick={() => addUserToTeam(u.name, addTargetTeamId)}
+                            disabled={isAdding}
+                            style={{
+                              background: C.teal + '22', color: C.teal,
+                              border: `1px solid ${C.teal}44`, borderRadius: 5,
+                              padding: '2px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                              whiteSpace: 'nowrap', opacity: isAdding ? 0.5 : 1,
+                            }}
+                          >
+                            {isAdding ? '…' : 'Add to Team →'}
+                          </button>
+                        )}
+                        {!addTargetTeamId && (
+                          <span style={{ color: C.textMuted, fontSize: 10 }}>↑ Select team</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!outreachLoaded && !outreachLoading && (
+          <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '20px 0' }}>
+            Click "Import from Outreach" to load the user directory.
           </div>
         )}
       </div>
