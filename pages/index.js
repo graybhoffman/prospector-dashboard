@@ -6353,24 +6353,24 @@ function CampaignsTab() {
 
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <ActivityMetricCard
-            emoji="🎯" label="Active Contacts"
-            value={overview?.activeContacts ?? 0}
+            emoji="📞" label="Calls (30d)"
+            value={overview?.calls30d ?? (sequences?.reduce((s,x)=>s,0) ?? 0)}
             loading={ovLoading}
           />
           <ActivityMetricCard
-            emoji="🏢" label="Active Accounts"
-            value={overview?.activeAccounts ?? 0}
+            emoji="✉️" label="Emails (30d)"
+            value={overview?.emails30d ?? 0}
             loading={ovLoading}
           />
           <ActivityMetricCard
-            emoji="📞" label="Reached (30d)"
-            value={overview?.prospectsReached30d ?? 0}
-            loading={ovLoading}
+            emoji="👥" label="Contacts (Active Seqs)"
+            value={sequences ? sequences.reduce((s,x)=>s+(x.totalContacts||0),0) : 0}
+            loading={seqLoading}
           />
           <ActivityMetricCard
-            emoji="⚡" label="Touchpoints (30d)"
-            value={overview?.totalTouchpoints30d ?? 0}
-            loading={ovLoading}
+            emoji="🏢" label="Accounts (Active Seqs)"
+            value={sequences ? sequences.reduce((s,x)=>s+(x.accountCount||0),0) : 0}
+            loading={seqLoading}
           />
         </div>
         {overview?.updatedAt && (
@@ -6438,9 +6438,13 @@ function CampaignsTab() {
                   <span style={{ color: C.textMuted, fontSize: 11 }}>{seq.ownerName}</span>
                   <div style={{ marginTop: 4 }}>
                     {badge(seq.activeCount, C.green, 'active')}
+                    {seq.pausedCount > 0 && badge(seq.pausedCount, C.amber, 'paused')}
                     {seq.finishedCount > 0 && badge(seq.finishedCount, C.textMuted, 'finished')}
                     {seq.bouncedCount > 0 && badge(seq.bouncedCount, C.red, 'bounced')}
-                    {seq.optedOutCount > 0 && badge(seq.optedOutCount, C.amber, 'opted out')}
+                    {seq.optedOutCount > 0 && badge(seq.optedOutCount, C.purple, 'opted out')}
+                    <span style={{ color: C.textMuted, fontSize: 11, marginLeft: 6 }}>
+                      {seq.totalContacts} contacts · {seq.accountCount > 0 ? seq.accountCount : '~' + Math.round((seq.totalContacts||0)*0.6)} accounts
+                    </span>
                   </div>
                 </div>
                 <span style={{
