@@ -13,6 +13,7 @@ import {
   Cell, LabelList,
 } from 'recharts';
 import DataGrid, { STAGE_COLORS, STAGE_TEXT_COLORS } from '../components/DataGrid';
+import { AccountDetailPopup, OppEditPopup } from '../components/DetailPopup';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const C = {
@@ -981,6 +982,7 @@ function useColumnState(storageKey, defaults) {
 // ─── Account Table ────────────────────────────────────────────────────────────
 function AccountTable({ records, meta, page, setPage, visibleCols, allCols, onToggleCol, onResetCols, schemaProps }) {
   const [expandedRow, setExpandedRow] = useState(null);
+  const [viewingAccountId, setViewingAccountId] = useState(null);
   const cols = allCols.filter((c) => visibleCols.has(c));
 
   const thStyle = {
@@ -1020,8 +1022,10 @@ function AccountTable({ records, meta, page, setPage, visibleCols, allCols, onTo
                 return [
                   <tr
                     key={r.id || i}
-                    onClick={() => setExpandedRow(isExpanded ? null : i)}
+                    onClick={() => setViewingAccountId(r.id)}
                     style={{ background: isExpanded ? C.cardHover : 'transparent', cursor: 'pointer', transition: 'background 0.1s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
+                    onMouseLeave={e => e.currentTarget.style.background = isExpanded ? C.cardHover : 'transparent'}
                   >
                     {cols.map((col) => (
                       <td key={col} style={{
@@ -1066,6 +1070,9 @@ function AccountTable({ records, meta, page, setPage, visibleCols, allCols, onTo
           <span style={{ color: C.textSec, fontSize: 12 }}>Page {meta.page} of {meta.totalPages}</span>
           <PaginationBtn disabled={page >= meta.totalPages} onClick={() => setPage((p) => p + 1)}>Next →</PaginationBtn>
         </div>
+      )}
+      {viewingAccountId && (
+        <AccountDetailPopup id={viewingAccountId} onClose={() => setViewingAccountId(null)} />
       )}
     </div>
   );
@@ -1521,6 +1528,7 @@ function MarketAccountList({ globals, chartFilter }) {
   const [expanded, setExpanded] = useState(false);
   const [page, setPage] = useState(1);
   const [localFilters, setLocalFilters] = useState({});
+  const [viewingAccountId, setViewingAccountId] = useState(null);
 
   const buildUrl = () => {
     const p = new URLSearchParams({ page, pageSize: 50 });
@@ -1662,7 +1670,8 @@ function MarketAccountList({ globals, chartFilter }) {
                 <tbody>
                   {records.map((r, i) => (
                     <tr key={r.id || i}
-                      style={{ transition: 'background 0.1s', cursor: 'default' }}
+                      style={{ transition: 'background 0.1s', cursor: 'pointer' }}
+                      onClick={() => setViewingAccountId(r.id || r.fields?.['sfdc_id'])}
                       onMouseEnter={(e) => e.currentTarget.style.background = C.cardHover}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
                       {mktCols.map((col) => (
@@ -1697,11 +1706,12 @@ function MarketAccountList({ globals, chartFilter }) {
           )}
         </div>
       )}
+      {viewingAccountId && (
+        <AccountDetailPopup id={viewingAccountId} onClose={() => setViewingAccountId(null)} />
+      )}
     </div>
   );
 }
-
-// ─── Section 5: Market Overview ───────────────────────────────────────────────
 function HBarChart({ data, color, maxItems = 15, onBarClick, selectedName }) {
   const items = data.slice(0, maxItems);
   const maxVal = Math.max(...items.map((d) => d.value), 1);
@@ -1804,6 +1814,36 @@ function CrosstabMatrix({ rowDim, colDim }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── Ownership Bar Chart ──────────────────────────────────────────────────────
+function OwnershipBarChart({ chartCard, chartTitle }) {
+  const { data, isLoading } = useSWR('/api/icp-ownership', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 5 * 60_000,
+  });
+
+  const owners = data?.owners || [];
+
+  return (
+    <div style={{ ...chartCard, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={chartTitle}>Account Ownership (Top 8 Owners)</div>
+        {data?.total != null && (
+          <span style={{ color: C.textMuted, fontSize: 10 }}>{data.total.toLocaleString()} accounts</span>
+        )}
+      </div>
+      {isLoading && (
+        <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '12px 0' }}>Loading…</div>
+      )}
+      {!isLoading && owners.length === 0 && (
+        <div style={{ color: C.textMuted, fontSize: 12 }}>No ownership data available.</div>
+      )}
+      {!isLoading && owners.length > 0 && (
+        <HBarChart data={owners} color={C.purple} maxItems={9} />
+      )}
     </div>
   );
 }
@@ -1935,6 +1975,9 @@ function MarketOverviewSection({ globals, title = '🌍 Addressable Market Overv
           />
         </div>
       </div>
+
+      {/* Ownership Bar Chart */}
+      <OwnershipBarChart chartCard={chartCard} chartTitle={chartTitle} />
 
       {/* Crosstab */}
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px', marginBottom: 0 }}>
@@ -2828,7 +2871,7 @@ function DataSection() {
 
 // ─── Manage Tab ───────────────────────────────────────────────────────────────
 function ManageTab() {
-  const [subTab, setSubTab] = useState('accounts');
+  const [subTab, setSubTab] = useState('dedup');
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
   const [stageFilter, setStageFilter] = useState('');
@@ -3183,13 +3226,11 @@ function ManageTab() {
       </div>
 
       <div style={S.subTabBar}>
-        <button style={S.subTab(subTab === 'accounts')} onClick={() => setSubTab('accounts')}>📋 Accounts</button>
         <button style={S.subTab(subTab === 'dedup')} onClick={() => setSubTab('dedup')}>🔁 Dedup Queue</button>
         <button style={S.subTab(subTab === 'synclog')} onClick={() => setSubTab('synclog')}>🕐 Sync Log</button>
         <button style={S.subTab(subTab === 'teams')} onClick={() => setSubTab('teams')}>👥 Teams &amp; Users</button>
       </div>
 
-      {subTab === 'accounts' && <AccountsManageTable />}
       {subTab === 'dedup'    && <DedupQueueTab />}
       {subTab === 'synclog'  && <SyncLogTab />}
       {subTab === 'teams'    && <TeamsSettings />}
@@ -4347,11 +4388,46 @@ function ActivityTrendCharts() {
 
 // ─── Activity Dashboard ───────────────────────────────────────────────────────
 function ActivityDashboard() {
-  // ── All ICP data (no team filter) ──
-  const { data: todayData,   isLoading: todayLoading  } = useSWR('/api/activity-stats?window=today',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
-  const { data: weekData,    isLoading: weekLoading   } = useSWR('/api/activity-stats?window=week',   fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  // ── Sub-tab state ──
+  const [actSubTab, setActSubTab] = useState('agents-team');
 
-  // ── Agents Team setup ──
+  return (
+    <div>
+      {/* Sub-tab nav */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+        {[
+          { id: 'agents-team',        label: '🤖 Agents Team',       accent: C.purple },
+          { id: 'pipeline-accounts',  label: '📊 Pipeline Accounts', accent: C.blue   },
+        ].map(t => (
+          <button key={t.id} onClick={() => setActSubTab(t.id)} style={{
+            padding: '6px 14px', borderRadius: 6, border: `1px solid ${actSubTab === t.id ? t.accent : C.border}`,
+            background: actSubTab === t.id ? t.accent + '22' : 'transparent',
+            color: actSubTab === t.id ? t.accent : C.textSec,
+            fontWeight: actSubTab === t.id ? 700 : 400, fontSize: 13, cursor: 'pointer',
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {actSubTab === 'agents-team'       && <AgentsTeamActivity />}
+      {actSubTab === 'pipeline-accounts' && <PipelineAccountsActivity />}
+    </div>
+  );
+}
+
+// ── Agents Team Activity (Outreach API) ───────────────────────────────────────
+function AgentsTeamActivity() {
+  const { data: todayData, isLoading: todayLoading } = useSWR('/api/outreach-activity-stats?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/outreach-activity-stats?window=week',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+
+  const today = todayData?.stats || { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const week  = weekData?.stats  || { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const isLive = todayData?.isLive ?? false;
+  const scopeError = todayData?.error || null;
+  const teamMembers = todayData?.teamMembers || weekData?.teamMembers || [];
+
+  // SFDC team suffix for detail tables (agents team names from settings)
   const [agentsTeamUserNames, setAgentsTeamUserNames] = useState([]);
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -4359,81 +4435,50 @@ function ActivityDashboard() {
       const ids = JSON.parse(localStorage.getItem('wt_agents_team_sfdc_ids') || '[]');
       const users = JSON.parse(localStorage.getItem('wt_sfdc_users_cache') || '[]');
       if (ids.length > 0 && users.length > 0) {
-        const names = users
-          .filter(u => ids.includes(u.Id))
-          .map(u => u.Name)
-          .filter(Boolean);
+        const names = users.filter(u => ids.includes(u.Id)).map(u => u.Name).filter(Boolean);
         setAgentsTeamUserNames(names);
       }
     } catch {}
   }, []);
-
-  const hasAgentsTeam = agentsTeamUserNames.length > 0;
-  const agentsSuffix = hasAgentsTeam
+  const agentsSuffix = agentsTeamUserNames.length > 0
     ? `&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
     : '';
 
-  const agentsStatUrl = hasAgentsTeam
-    ? `/api/activity-stats?window=today&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
-    : null;
-  const agentsWeekStatUrl = hasAgentsTeam
-    ? `/api/activity-stats?window=week&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
-    : null;
-
-  const { data: agentsTodayData, isLoading: agentsTodayLoading } = useSWR(agentsStatUrl, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
-  const { data: agentsWeekData,  isLoading: agentsWeekLoading  } = useSWR(agentsWeekStatUrl, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
-
-  const today = todayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-  const week  = weekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-  const agentsToday = agentsTodayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-  const agentsWeek  = agentsWeekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-
-  // "This Week" section: prefer agents-team filtered data when team is configured
-  const displayWeek     = hasAgentsTeam ? agentsWeek     : week;
-  const displayWeekData = hasAgentsTeam ? agentsWeekData : weekData;
-  const displayWeekLoading = hasAgentsTeam ? agentsWeekLoading : weekLoading;
-
-  const isLive = todayData?.isLive ?? false;
-  const liveNote = !isLive ? 'Live once SFDC sync active' : null;
-
   return (
     <div>
-      {/* Live status banner */}
-      {!isLive && (
-        <div style={{ background: C.amber + '11', border: `1px solid ${C.amber}33`, borderRadius: 8, padding: '8px 14px', marginBottom: 14, color: C.amber, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>⏳</span>
-          <span>Activity sync not yet active — stats below are placeholders. Once SFDC Task sync runs, this dashboard will populate automatically.</span>
-        </div>
-      )}
-
-      {/* ── Section 1 — Agents Team Activity ── */}
-      <DashSection title="🤖 Agents Team Activity" accent={C.purple}>
-        {!hasAgentsTeam ? (
-          <div style={{ padding: '16px', color: C.textMuted, fontSize: 13, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, textAlign: 'center' }}>
-            No Agents Team defined — go to <strong style={{ color: C.textSec }}>Settings → Teams &amp; Users</strong> to configure
-          </div>
-        ) : (
-          <>
-            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
-              Filtering for: {agentsTeamUserNames.join(', ')}
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-              <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={agentsToday.calls}              target={40} loading={agentsTodayLoading} note={liveNote} />
-              <ActivityMetricCard emoji="🔗" label="Live Connects"       value={agentsToday.connects}           target={4}  loading={agentsTodayLoading} note={liveNote} />
-              <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={agentsToday.contactsContacted}  target={null} loading={agentsTodayLoading} note={liveNote} />
-              <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={agentsToday.accountsContacted}  target={null} loading={agentsTodayLoading} note={liveNote} />
-              <ActivityMetricCard emoji="📅" label="Sets"                value={agentsToday.sets}               target={1}  loading={agentsTodayLoading} note={liveNote} />
-            </div>
-          </>
+      {/* Outreach source badge */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ background: C.purple + '22', color: C.purple, border: `1px solid ${C.purple}44`, borderRadius: 5, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+          📡 Outreach API
+        </span>
+        {teamMembers.length > 0 && (
+          <span style={{ color: C.textMuted, fontSize: 11 }}>
+            Team: {teamMembers.map(m => m.name).join(', ')}
+          </span>
         )}
+        {!isLive && scopeError && (
+          <span style={{ color: C.amber, fontSize: 11 }}>
+            ⚠️ {scopeError}
+          </span>
+        )}
+      </div>
+
+      {/* ── Today's Stats ── */}
+      <DashSection title="📊 Today — Agents Team" accent={C.purple}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}             target={40}   loading={todayLoading} />
+          <ActivityMetricCard emoji="🔗" label="Connects"            value={today.connects}          target={4}    loading={todayLoading} />
+          <ActivityMetricCard emoji="✉️"  label="Emails Sent"         value={today.emailsSent}        target={null} loading={todayLoading} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={today.contactsContacted} target={null} loading={todayLoading} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={today.accountsContacted} target={null} loading={todayLoading} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={today.sets}              target={1}    loading={todayLoading} />
+        </div>
       </DashSection>
 
-      {/* ── Section 1b — Agents Team Daily Activity Detail ── */}
-      {hasAgentsTeam && (
+      {/* ── Daily Detail Tables (SFDC-sourced until Outreach detail API is available) ── */}
+      {agentsTeamUserNames.length > 0 && (
         <DashSection title="📋 Agents Team Daily Detail" accent={C.purple} defaultOpen={false}>
-          <ActivitySyncBanner onRefresh={() => {
-            if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();
-          }} />
+          <ActivitySyncBanner onRefresh={() => { if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__(); }} />
           <OutboundCallsTable teamSuffix={agentsSuffix} />
           <LiveConnectsTable teamSuffix={agentsSuffix} />
           <ContactsContactedTable teamSuffix={agentsSuffix} />
@@ -4442,23 +4487,59 @@ function ActivityDashboard() {
         </DashSection>
       )}
 
-      {/* ── Section 2 — All ICP Account Activity ── */}
-      <DashSection title="📊 All ICP Account Activity" accent={C.blue}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}              target={40} loading={todayLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={today.connects}           target={4}  loading={todayLoading} note={liveNote} />
-          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={today.contactsContacted}  target={null} loading={todayLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={today.accountsContacted}  target={null} loading={todayLoading} note={liveNote} />
-          <ActivityMetricCard emoji="📅" label="Sets"                value={today.sets}               target={1}  loading={todayLoading} note={liveNote} />
+      {/* ── This Week's Stats ── */}
+      <DashSection title={`📅 This Week — ${getWeekRange()}`} accent={C.teal}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}             target={200}  loading={weekLoading} />
+          <ActivityMetricCard emoji="🔗" label="Connects"            value={week.connects}          target={20}   loading={weekLoading} />
+          <ActivityMetricCard emoji="✉️"  label="Emails Sent"         value={week.emailsSent}        target={null} loading={weekLoading} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={week.contactsContacted} target={null} loading={weekLoading} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={week.accountsContacted} target={null} loading={weekLoading} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={week.sets}              target={5}    loading={weekLoading} />
         </div>
       </DashSection>
 
-      {/* ── Section 2b — All ICP Daily Activity Detail ── */}
-      <DashSection title="📋 All ICP Daily Activity Detail" accent={C.blue} defaultOpen={false}>
-        <ActivitySyncBanner onRefresh={() => {
-          // Trigger SWR revalidation by mutating cache keys
-          if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__();
-        }} />
+      {/* ── Trends ── */}
+      <DashSection title="📈 Trends" accent={C.green} defaultOpen={true} storageKey="wt_show_trends">
+        <ActivityTrendCharts />
+      </DashSection>
+    </div>
+  );
+}
+
+// ── Pipeline Accounts Activity (SFDC, filtered to active CCA opp accounts) ───
+function PipelineAccountsActivity() {
+  const { data: todayData, isLoading: todayLoading } = useSWR('/api/activity-stats?window=today&pipelineOnly=true', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/activity-stats?window=week&pipelineOnly=true',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+
+  const today = todayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const week  = weekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  const isLive = todayData?.isLive ?? false;
+  const liveNote = !isLive ? 'Live once SFDC sync active' : null;
+
+  return (
+    <div>
+      {/* SFDC source badge */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ background: C.blue + '22', color: C.blue, border: `1px solid ${C.blue}44`, borderRadius: 5, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+          🔵 SFDC — Accounts with Active CCA Opps
+        </span>
+      </div>
+
+      {/* ── Today's Stats ── */}
+      <DashSection title="📊 Today — Pipeline Accounts" accent={C.blue}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}             target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🔗" label="Connects"            value={today.connects}          target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={today.contactsContacted} target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={today.accountsContacted} target={null} loading={todayLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={today.sets}              target={null} loading={todayLoading} note={liveNote} />
+        </div>
+      </DashSection>
+
+      {/* ── Daily Detail ── */}
+      <DashSection title="📋 Pipeline Accounts Daily Detail" accent={C.blue} defaultOpen={false}>
+        <ActivitySyncBanner onRefresh={() => { if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__(); }} />
         <OutboundCallsTable />
         <LiveConnectsTable />
         <ContactsContactedTable />
@@ -4466,19 +4547,14 @@ function ActivityDashboard() {
         <SetsTable />
       </DashSection>
 
-      {/* ── Section 3 — This Week's Stats ── */}
-      <DashSection title={`📅 This Week's Stats — ${getWeekRange()}`} accent={C.teal}>
-        {hasAgentsTeam && (
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8 }}>
-            Filtering for: {agentsTeamUserNames.join(', ')}
-          </div>
-        )}
+      {/* ── This Week's Stats ── */}
+      <DashSection title={`📅 This Week — ${getWeekRange()}`} accent={C.teal}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={displayWeek.calls}              target={200} loading={displayWeekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🔗" label="Live Connects"       value={displayWeek.connects}           target={20}  loading={displayWeekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={displayWeek.contactsContacted}  target={null} loading={displayWeekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={displayWeek.accountsContacted}  target={null} loading={displayWeekLoading} note={liveNote} />
-          <ActivityMetricCard emoji="📅" label="Sets"                value={displayWeek.sets}               target={5}   loading={displayWeekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}             target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🔗" label="Connects"            value={week.connects}          target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={week.contactsContacted} target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="🏢" label="Accounts Contacted"  value={week.accountsContacted} target={null} loading={weekLoading} note={liveNote} />
+          <ActivityMetricCard emoji="📅" label="Sets"                value={week.sets}              target={null} loading={weekLoading} note={liveNote} />
         </div>
         {/* Daily breakdown table */}
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
@@ -4494,35 +4570,27 @@ function ActivityDashboard() {
             </thead>
             <tbody>
               {[
-                { label: '📞 Calls', target: 40, key: 'calls' },
-                { label: '🔗 Connects', target: 4, key: 'connects' },
-                { label: '👤 Contacts', target: null, key: 'contactsContacted' },
-                { label: '🏢 Accounts', target: null, key: 'accountsContacted' },
-                { label: '📅 Sets', target: 1, key: 'sets' },
+                { label: '📞 Calls', key: 'calls' },
+                { label: '🔗 Connects', key: 'connects' },
+                { label: '👤 Contacts', key: 'contactsContacted' },
+                { label: '🏢 Accounts', key: 'accountsContacted' },
+                { label: '📅 Sets', key: 'sets' },
               ].map(metric => (
                 <tr key={metric.key}>
-                  <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, color: C.textSec, fontSize: 12 }}>
-                    {metric.label}
-                    {metric.target && <span style={{ color: C.textMuted, fontSize: 10 }}> (tgt: {metric.target}/day)</span>}
-                  </td>
+                  <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, color: C.textSec, fontSize: 12 }}>{metric.label}</td>
                   {['mon', 'tue', 'wed', 'thu', 'fri'].map(day => (
                     <td key={day} style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>
-                      {displayWeekData?.daily?.[day]?.[metric.key] ?? '—'}
+                      {weekData?.daily?.[day]?.[metric.key] ?? '—'}
                     </td>
                   ))}
                   <td style={{ padding: '6px 12px', borderBottom: `1px solid ${C.border}1a`, textAlign: 'center', color: C.teal, fontWeight: 700, fontSize: 12 }}>
-                    {displayWeek[metric.key] || '—'}
+                    {week[metric.key] || '—'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </DashSection>
-
-      {/* ── Section 4 — Activity Trends ── */}
-      <DashSection title="📈 Trends" accent={C.green} defaultOpen={true} storageKey="wt_show_trends">
-        <ActivityTrendCharts />
       </DashSection>
     </div>
   );
@@ -4700,6 +4768,7 @@ function AccountsDataTab() {
 
   const [showQueue, setShowQueue] = useState(false);
   const [queueCount, setQueueCount] = useState(null);
+  const [viewingAccountId, setViewingAccountId] = useState(null);
 
   useEffect(() => {
     fetch('/api/accounts?queue=enrichment&limit=1&page=1')
@@ -4760,6 +4829,7 @@ function AccountsDataTab() {
         defaultSort={{ key: 'name', dir: 'asc' }}
         savedViewsKey={showQueue ? 'wt_accounts_queue' : 'wt_accounts_v2'}
         dataKey="accounts"
+        onRowClick={(row) => setViewingAccountId(row.id || row.sfdc_id)}
         quickFilters={showQueue ? [] : [
           { label: 'ICP Only',    params: { agents_icp: 'true' } },
           { label: 'Has Stage',   params: { has_stage: 'true' } },
@@ -4770,6 +4840,9 @@ function AccountsDataTab() {
           { label: 'Partners',    params: { source_category: 'Partnerships' } },
         ]}
       />
+      {viewingAccountId && (
+        <AccountDetailPopup id={viewingAccountId} onClose={() => setViewingAccountId(null)} />
+      )}
     </div>
   );
 }
@@ -4868,6 +4941,9 @@ function OpportunitiesDataTab() {
 }
 
 function OpportunitiesTableView() {
+  const [editingOpp, setEditingOpp] = useState(null);
+  const [oppListKey, setOppListKey] = useState(0); // force DataGrid refresh after save
+
   const fmtAcv = (n) => {
     if (n == null || n === '') return '—';
     if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -4946,11 +5022,13 @@ function OpportunitiesTableView() {
   return (
     <div style={{ marginTop: 16 }}>
       <DataGrid
+        key={oppListKey}
         columns={columns}
         fetchUrl="/api/opportunities"
         defaultSort={{ key: 'account_name', dir: 'asc' }}
         savedViewsKey="wt_opps_v2"
         dataKey="opportunities"
+        onRowClick={(row) => setEditingOpp(row)}
         quickFilters={[
           { label: 'Active Only',  params: { active_only: 'true' } },
           { label: 'Closed-Won',   params: { closed_won: 'true' } },
@@ -4959,6 +5037,13 @@ function OpportunitiesTableView() {
           { label: 'Missing ACV',  params: { missing_acv: 'true' } },
         ]}
       />
+      {editingOpp && (
+        <OppEditPopup
+          opp={editingOpp}
+          onClose={() => setEditingOpp(null)}
+          onSaved={() => { setEditingOpp(null); setOppListKey(k => k + 1); }}
+        />
+      )}
     </div>
   );
 }
@@ -4967,6 +5052,8 @@ function OpportunitiesTableView() {
 function OpportunitiesKanbanSection() {
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [editingOpp, setEditingOpp] = useState(null);
+  const [kanbanKey, setKanbanKey] = useState(0); // refresh after save
 
   const { data, isLoading, error } = useSWR(
     '/api/opportunities?active_only=true&pageSize=200',
@@ -5171,14 +5258,16 @@ function OpportunitiesKanbanSection() {
                   const acvStr = fmtAcv(Number(opp.amount));
                   const ownerColor = ownerColors[opp.owner] || C.textMuted;
                   const closeStr = fmtDate(opp.close_date);
+                  const isPartner = opp.is_partner || opp.override_icp_reason === 'partner';
 
                   return (
                     <div key={opp.id} style={{
                       background: C.card, border: `1px solid ${C.border}`,
                       borderRadius: 10, padding: '10px 12px',
                       transition: 'border-color 0.15s, background 0.15s',
-                      cursor: 'default',
+                      cursor: 'pointer',
                     }}
+                      onClick={() => setEditingOpp(opp)}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.borderColor = color + '66';
                         e.currentTarget.style.background = C.cardHover;
@@ -5188,9 +5277,10 @@ function OpportunitiesKanbanSection() {
                         e.currentTarget.style.background = C.card;
                       }}
                     >
-                      {/* Account name + SFDC link */}
+                      {/* Account name + partner flag + SFDC link */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 3 }}>
                         <span style={{ color: C.textPri, fontWeight: 700, fontSize: 13, lineHeight: 1.3 }}>
+                          {isPartner && <span title="Partner account" style={{ marginRight: 4 }}>🤝</span>}
                           {opp.account_name || '—'}
                         </span>
                         {opp.sfdc_link && (
@@ -5198,6 +5288,7 @@ function OpportunitiesKanbanSection() {
                             href={opp.sfdc_link}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
                             style={{ color: C.blue, fontSize: 14, lineHeight: 1, flexShrink: 0, textDecoration: 'none', opacity: 0.7 }}
                             title="Open in Salesforce"
                           >↗</a>
@@ -5206,8 +5297,23 @@ function OpportunitiesKanbanSection() {
 
                       {/* Opp name */}
                       {opp.name && opp.name !== opp.account_name && (
-                        <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 8, lineHeight: 1.3 }}>
+                        <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 6, lineHeight: 1.3 }}>
                           {opp.name}
+                        </div>
+                      )}
+
+                      {/* Account stage badge */}
+                      {opp.agents_stage && (
+                        <div style={{ marginBottom: 6 }}>
+                          <span style={{
+                            background: (STAGE_COLORS[opp.agents_stage] || '#374151'),
+                            color: (STAGE_TEXT_COLORS[opp.agents_stage] || '#9ca3af'),
+                            border: `1px solid ${(STAGE_TEXT_COLORS[opp.agents_stage] || '#9ca3af')}33`,
+                            borderRadius: 4, padding: '1px 6px', fontSize: 9, fontWeight: 600,
+                            textTransform: 'uppercase', letterSpacing: '0.3px',
+                          }}>
+                            Acct: {opp.agents_stage}
+                          </span>
                         </div>
                       )}
 
@@ -5248,6 +5354,17 @@ function OpportunitiesKanbanSection() {
           );
         })}
       </div>
+
+      {editingOpp && (
+        <OppEditPopup
+          opp={editingOpp}
+          onClose={() => setEditingOpp(null)}
+          onSaved={(updated) => {
+            setEditingOpp(null);
+            setKanbanKey(k => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

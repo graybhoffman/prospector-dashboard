@@ -94,6 +94,7 @@ export default function DataGrid({
   emptyState,
   selectable = false,
   bulkActions = null,
+  onRowClick = null,
 }) {
   const [sort, setSort]                         = useState(defaultSort || { key: null, dir: 'asc' });
   const [colFilters, setColFilters]             = useState({});   // display state (immediate)
@@ -579,7 +580,12 @@ export default function DataGrid({
                 return (
                 <tr
                   key={rowId || i}
-                  style={{ transition: 'background 0.1s', background: isSelected ? '#7c3aed11' : undefined }}
+                  style={{
+                    transition: 'background 0.1s',
+                    background: isSelected ? '#7c3aed11' : undefined,
+                    cursor: onRowClick ? 'pointer' : 'default',
+                  }}
+                  onClick={() => onRowClick && onRowClick(row)}
                   onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = C.cardHover; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? '#7c3aed11' : 'transparent'; }}
                 >

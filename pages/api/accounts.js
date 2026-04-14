@@ -21,7 +21,7 @@
  *   dir                  "asc" | "desc"
  *   page                 (default 1)
  *   limit / pageSize     (default 50, max 200)
- *   includeExcluded      "true" = include excluded accounts (overrides default hide)
+ *   includeExcluded      "true" = show ALL accounts (no db_status filter); "false" (default) = hide excluded only
  *
  * Response: { accounts, total, page, pageSize }
  */
@@ -97,16 +97,21 @@ export default async function handler(req, res) {
   const conditions = [];
 
   // ── db_status filtering ────────────────────────────────────────────────────
-  // ?queue=enrichment → show enrichment_queue accounts only
-  // default          → show main + NULL accounts only
-  // excluded accounts (db_status = 'excluded') are NEVER shown
+  // ?queue=enrichment     → show enrichment_queue accounts only
+  // ?includeExcluded=true → show ALL accounts (no db_status filter — "Show Excluded" toggle ON)
+  // default               → hide excluded accounts only (db_status != 'excluded')
+  // Special manage-tab case: exclude_from_reporting=true&includeExcluded=true → show flagged accounts
   if (queue === 'enrichment') {
     conditions.push("db_status = 'enrichment_queue'");
   } else if (exclude_from_reporting === 'true' && includeExcluded === 'true') {
     // Special case: manage tab showing excluded accounts (existing behaviour)
     conditions.push('exclude_from_reporting = TRUE');
+  } else if (includeExcluded === 'true') {
+    // Show Excluded toggle ON: no db_status filter — show everything
+    // (no condition pushed)
   } else {
-    conditions.push("(db_status = 'main' OR db_status IS NULL)");
+    // Default: hide excluded accounts, but show main, NULL, enrichment_queue, etc.
+    conditions.push("(db_status IS NULL OR db_status != 'excluded')");
   }
 
   // Legacy exclude_from_reporting filter (only applies outside db_status mode)
@@ -189,14 +194,43 @@ export default async function handler(req, res) {
   const ps = Math.min(200, parseInt(limit || pageSize, 10));
   const offset = (pg - 1) * ps;
 
+  // BUG 3 FIX: Deduplicate accounts that share the same sfdc_id or same name+null-sfdc_id.
+  // Duplicate rows exist in the DB (same name, sfdc_id=NULL) from multiple import sources.
+  // We use ROW_NUMBER() to keep the best row per logical account:
+  //   - Prefer rows with a sfdc_id set (SFDC-synced data)
+  //   - Among ties, prefer rows with db_status = 'main' (more enriched)
+  //   - Finally, keep the row with the lowest id (oldest / first imported)
+  // The dedup key is COALESCE(sfdc_id, name) so:
+  //   - Rows with the same sfdc_id → deduplicated to one row
+  //   - Rows with sfdc_id=NULL + same name → deduplicated to one row
+  //   - Different sfdc_ids with same name → kept separately (legitimately different accounts)
+  const dedupCTE = `
+    WITH ranked AS (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY COALESCE(sfdc_id, name)
+          ORDER BY
+            (sfdc_id IS NOT NULL) DESC,
+            (db_status = 'main') DESC,
+            (agents_stage IS NOT NULL AND agents_stage != '') DESC,
+            id ASC
+        ) AS _dedup_rn
+      FROM accounts
+      ${where}
+    )
+  `;
+
   try {
     const [countResult, dataResult] = await Promise.all([
-      query(`SELECT COUNT(*) FROM accounts ${where}`, params),
-      query(`SELECT * FROM accounts ${where} ${orderBy} LIMIT ${ps} OFFSET ${offset}`, params),
+      query(`${dedupCTE} SELECT COUNT(*) FROM ranked WHERE _dedup_rn = 1`, params),
+      query(`${dedupCTE} SELECT * FROM ranked WHERE _dedup_rn = 1 ${orderBy} LIMIT ${ps} OFFSET ${offset}`, params),
     ]);
 
+    // Strip the internal dedup column from results
+    const accounts = dataResult.rows.map(({ _dedup_rn, ...rest }) => rest);
+
     return res.status(200).json({
-      accounts: dataResult.rows,
+      accounts,
       total: parseInt(countResult.rows[0].count, 10),
       page: pg,
       pageSize: ps,

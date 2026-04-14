@@ -4,7 +4,9 @@
  * Returns aggregated activity statistics for different time windows.
  *
  * Query params:
- *   window  "today" | "week" | "day-14" | "week-4" | "month-4"
+ *   window         "today" | "week" | "day-14" | "week-4" | "month-4"
+ *   teamUserNames  comma-separated rep names to filter to
+ *   pipelineOnly   "true" — filter to accounts that have an active CCA opportunity
  *
  * Response:
  *   {
@@ -38,7 +40,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const { window: win = 'today', teamUserNames } = req.query;
+  const { window: win = 'today', teamUserNames, pipelineOnly } = req.query;
 
   try {
     // Check if activities table exists and has data
@@ -90,8 +92,22 @@ export default async function handler(req, res) {
     const ptDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const now = new Date(ptDateStr + 'T12:00:00');
 
+    // If pipelineOnly=true, fetch account_sfdc_ids for accounts with active CCA opps
+    let pipelineAccountIds = null;
+    if (pipelineOnly === 'true') {
+      try {
+        const oppResult = await query(
+          `SELECT DISTINCT account_sfdc_id FROM opportunities
+           WHERE account_sfdc_id IS NOT NULL`
+        );
+        pipelineAccountIds = oppResult.rows.map(r => r.account_sfdc_id);
+      } catch {
+        pipelineAccountIds = [];
+      }
+    }
+
     if (win === 'today') {
-      const stats = await getStats('today', null, null, teamUserNames);
+      const stats = await getStats('today', null, null, teamUserNames, pipelineAccountIds);
       return res.status(200).json({ isLive: true, window: win, stats });
     }
 
@@ -108,14 +124,15 @@ export default async function handler(req, res) {
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().slice(0, 10);
-        daily[dayNames[i]] = await getStatsForDate(ds, teamUserNames);
+        daily[dayNames[i]] = await getStatsForDate(ds, teamUserNames, pipelineAccountIds);
       }
 
       // Week totals
       const stats = await getStats('range',
         monday.toISOString().slice(0, 10),
         now.toISOString().slice(0, 10),
-        teamUserNames
+        teamUserNames,
+        pipelineAccountIds
       );
 
       return res.status(200).json({ isLive: true, window: win, stats, daily });
@@ -127,7 +144,7 @@ export default async function handler(req, res) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
         const ds = d.toISOString().slice(0, 10);
-        const s = await getStatsForDate(ds, teamUserNames);
+        const s = await getStatsForDate(ds, teamUserNames, pipelineAccountIds);
         trend.push({
           label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           ...s,
@@ -146,7 +163,7 @@ export default async function handler(req, res) {
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
         sunday.setHours(23, 59, 59, 999);
-        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames);
+        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames, pipelineAccountIds);
         trend.push({
           label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
           ...s,
@@ -160,7 +177,7 @@ export default async function handler(req, res) {
       for (let i = 3; i >= 0; i--) {
         const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames);
+        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames, pipelineAccountIds);
         trend.push({
           label: start.toLocaleDateString('en-US', { month: 'short' }),
           ...s,
@@ -179,7 +196,7 @@ export default async function handler(req, res) {
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
         sunday.setHours(23, 59, 59, 999);
-        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames);
+        const s = await getStats('range', monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10), teamUserNames, pipelineAccountIds);
         trend.push({
           label: `Wk ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
           ...s,
@@ -193,7 +210,7 @@ export default async function handler(req, res) {
       for (let i = 5; i >= 0; i--) {
         const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames);
+        const s = await getStats('range', start.toISOString().slice(0, 10), end.toISOString().slice(0, 10), teamUserNames, pipelineAccountIds);
         trend.push({
           label: start.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
           ...s,
@@ -211,11 +228,11 @@ export default async function handler(req, res) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function getStatsForDate(dateStr, teamUserNames) {
-  return getStats('date', dateStr, null, teamUserNames);
+async function getStatsForDate(dateStr, teamUserNames, pipelineAccountIds) {
+  return getStats('date', dateStr, null, teamUserNames, pipelineAccountIds);
 }
 
-async function getStats(mode, start, end, teamUserNames) {
+async function getStats(mode, start, end, teamUserNames, pipelineAccountIds) {
   let dateClause;
   if (mode === 'today') {
     dateClause = `DATE(activity_date AT TIME ZONE 'America/Los_Angeles') = (NOW() AT TIME ZONE 'America/Los_Angeles')::date`;
@@ -237,6 +254,18 @@ async function getStats(mode, start, end, teamUserNames) {
     }
   }
 
+  // Build pipeline accounts filter (filter to accounts that have an active CCA opp)
+  let pipelineClause = '';
+  if (pipelineAccountIds && pipelineAccountIds.length > 0) {
+    const startIdx = queryParams.length + 1;
+    const placeholders = pipelineAccountIds.map((_, i) => `$${startIdx + i}`).join(', ');
+    pipelineClause = `AND account_sfdc_id IN (${placeholders})`;
+    queryParams.push(...pipelineAccountIds);
+  } else if (pipelineAccountIds !== null && pipelineAccountIds !== undefined) {
+    // pipelineOnly=true but no pipeline accounts found → return zeros
+    return { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+  }
+
   try {
     const result = await query(`
       SELECT
@@ -255,6 +284,7 @@ async function getStats(mode, start, end, teamUserNames) {
       FROM activities
       WHERE ${dateClause}
       ${teamClause}
+      ${pipelineClause}
     `, queryParams.length > 0 ? queryParams : undefined);
 
     const r = result.rows[0] || {};

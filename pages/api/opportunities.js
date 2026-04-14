@@ -144,9 +144,41 @@ export default async function handler(req, res) {
   const offset = (pg - 1) * ps;
 
   try {
+    // Build FROM clause with account join for partner/stage enrichment
+    const fromClause = `opportunities o
+      LEFT JOIN accounts a ON (
+        (o.account_sfdc_id IS NOT NULL AND o.account_sfdc_id = a.sfdc_id)
+        OR (o.account_sfdc_id IS NULL AND o.account_id IS NOT NULL AND o.account_id = a.id)
+      )`;
+
+    const selectCols = `o.*,
+      a.agents_stage       AS agents_stage,
+      a.is_partner         AS is_partner,
+      a.override_icp_reason AS override_icp_reason`;
+
+    // Prefix unqualified column references that might be ambiguous
+    const safeWhere = where.replace(/\bname\b(?!\s*=\s*\$)/g, 'o.name')
+                           .replace(/FROM opportunities/, '')
+                           .replace(/account_name/g, 'o.account_name')
+                           .replace(/stage_normalized/g, 'o.stage_normalized')
+                           .replace(/owner\b/g, 'o.owner')
+                           .replace(/close_date/g, 'o.close_date')
+                           .replace(/source_category/g, 'o.source_category')
+                           .replace(/agents_icp/g, 'o.agents_icp')
+                           .replace(/ehr\b/g, 'o.ehr')
+                           .replace(/acv\b/g, 'o.acv');
+
+    const countWhere = conditions.length
+      ? `WHERE ${conditions.join(' AND ').replace(/account_name/g, 'o.account_name').replace(/stage_normalized/g, 'o.stage_normalized').replace(/\bowner\b/g, 'o.owner').replace(/close_date/g, 'o.close_date').replace(/source_category/g, 'o.source_category').replace(/agents_icp/g, 'o.agents_icp').replace(/\behr\b/g, 'o.ehr').replace(/\bacv\b/g, 'o.acv').replace(/\bname\b/g, 'o.name')}`
+      : '';
+
+    const safeOrderBy = orderBy.replace(/ORDER BY ([a-z_]+)/, (m, col) =>
+      SORTABLE_COLS.has(col) ? `ORDER BY o.${col}` : `ORDER BY o.account_name`
+    );
+
     const [countResult, dataResult] = await Promise.all([
-      query(`SELECT COUNT(*) FROM opportunities ${where}`, params),
-      query(`SELECT * FROM opportunities ${where} ${orderBy} LIMIT ${ps} OFFSET ${offset}`, params),
+      query(`SELECT COUNT(*) FROM ${fromClause} ${countWhere}`, params),
+      query(`SELECT ${selectCols} FROM ${fromClause} ${countWhere} ${safeOrderBy} LIMIT ${ps} OFFSET ${offset}`, params),
     ]);
 
     return res.status(200).json({
