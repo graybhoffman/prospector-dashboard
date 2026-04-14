@@ -82,19 +82,90 @@ function formatValue(key, val) {
   return String(val);
 }
 
-// ─── Account Detail Popup ─────────────────────────────────────────────────────
-function AccountDetailPopup({ id, onClose }) {
-  const { data, isLoading } = useSWR(`/api/accounts/${id}`, fetcher, { revalidateOnFocus: false });
+// ─── Account Detail / Edit Popup ─────────────────────────────────────────────
+const ACCOUNT_EDITABLE_FIELDS = [
+  // SFDC+DB
+  { key: 'name',                 label: 'Name',                  type: 'text',     sfdc: true },
+  { key: 'phone',                label: 'Phone',                 type: 'text',     sfdc: true },
+  { key: 'billing_city',         label: 'Billing City',          type: 'text',     sfdc: true },
+  { key: 'billing_state',        label: 'Billing State',         type: 'text',     sfdc: true },
+  { key: 'billing_postal_code',  label: 'Billing Postal Code',   type: 'text',     sfdc: true },
+  { key: 'industry',             label: 'Industry',              type: 'text',     sfdc: true },
+  { key: 'num_employees',        label: 'Employees',             type: 'number',   sfdc: true },
+  { key: 'annual_revenue',       label: 'Annual Revenue',        type: 'number',   sfdc: true },
+  { key: 'ehr_system',           label: 'EHR System',            type: 'text',     sfdc: true },
+  { key: 'specialty',            label: 'Specialty',             type: 'text',     sfdc: true },
+  // DB-only
+  { key: 'agents_stage',         label: 'Agents Stage',          type: 'select',   options: ['','Prospect','Outreach','Discovery','SQL','Negotiations','Closed-Won','Closed-Lost'] },
+  { key: 'agents_owner',         label: 'Agents Owner',          type: 'text' },
+  { key: 'enrichment_notes',     label: 'Enrichment Notes',      type: 'textarea' },
+  { key: 'icp_rationale',        label: 'ICP Rationale',         type: 'textarea' },
+  { key: 'override_icp_criteria',label: 'Override ICP Criteria', type: 'checkbox' },
+  { key: 'override_icp_reason',  label: 'Override ICP Reason',   type: 'select',   options: ['','partner','strategic_importance','slow_burn','other'] },
+  { key: 'next_step',            label: 'Next Step',             type: 'text' },
+  { key: 'campaign_tag',         label: 'Campaign Tag',          type: 'text' },
+  { key: 'db_status',            label: 'DB Status',             type: 'select',   options: ['','main','enrichment_queue','excluded'] },
+  { key: 'est_monthly_call_volume', label: 'Est Monthly Call Volume', type: 'number' },
+];
+
+function AccountDetailPopup({ id, onClose, onSaved }) {
+  const { data, isLoading, mutate } = useSWR(`/api/accounts/${id}`, fetcher, { revalidateOnFocus: false });
   const acc = data?.account;
+
+  const [editing, setEditing]       = useState(false);
+  const [form, setForm]             = useState({});
+  const [saving, setSaving]         = useState(false);
+  const [saveMsg, setSaveMsg]       = useState(null); // { ok, text }
+
+  // Sync form when acc loads or edit opens
+  useEffect(() => {
+    if (acc && editing) {
+      const initial = {};
+      for (const f of ACCOUNT_EDITABLE_FIELDS) {
+        initial[f.key] = acc[f.key] != null ? acc[f.key] : (f.type === 'checkbox' ? false : '');
+      }
+      setForm(initial);
+    }
+  }, [acc, editing]);
 
   // Close on Escape
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e) => {
+      if (e.key === 'Escape') {
+        if (editing) { setEditing(false); setSaveMsg(null); }
+        else onClose();
+      }
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, editing]);
 
-  // Priority fields order for accounts
+  async function handleSave() {
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const resp = await fetch(`/api/accounts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.error || 'Save failed');
+      await mutate({ account: result.account }, false);
+      const sfdcNote = result.sfdcUpdated
+        ? ' (synced to SFDC)'
+        : result.sfdcError ? ` (SFDC: ${result.sfdcError.slice(0, 60)})` : '';
+      setSaveMsg({ ok: true, text: '✓ Saved' + sfdcNote });
+      setEditing(false);
+      if (onSaved) onSaved(result.account);
+    } catch (err) {
+      setSaveMsg({ ok: false, text: '⚠ ' + err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Priority fields order for accounts (read mode)
   const PRIORITY_FIELDS = [
     'name', 'ehr_system', 'agents_stage', 'agents_owner', 'specialty',
     'num_employees', 'num_locations', 'num_providers', 'annual_revenue',
@@ -104,23 +175,17 @@ function AccountDetailPopup({ id, onClose }) {
     'date_entered_closed_won', 'next_step', 'last_touch_date',
   ];
 
-  const renderFields = () => {
+  const renderReadFields = () => {
     if (!acc) return null;
     const rendered = new Set();
     const sections = [];
 
-    // Priority fields first
     for (const key of PRIORITY_FIELDS) {
       if (acc[key] != null && acc[key] !== '' && acc[key] !== false) {
         const display = formatValue(key, acc[key]);
-        if (display) {
-          sections.push({ key, display });
-          rendered.add(key);
-        }
+        if (display) { sections.push({ key, display }); rendered.add(key); }
       }
     }
-
-    // Remaining populated fields
     for (const [key, val] of Object.entries(acc)) {
       if (rendered.has(key)) continue;
       if (SKIP_FIELDS.has(key)) continue;
@@ -139,31 +204,102 @@ function AccountDetailPopup({ id, onClose }) {
         <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px', paddingTop: 1 }}>
           {formatFieldName(key)}
         </span>
-        <span style={{ color: C.textSec, fontSize: 13, wordBreak: 'break-word' }}>
-          {display}
-        </span>
+        <span style={{ color: C.textSec, fontSize: 13, wordBreak: 'break-word' }}>{display}</span>
       </div>
     ));
   };
 
+  const inputStyle = {
+    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
+    color: C.textPri, padding: '5px 9px', fontSize: 12, outline: 'none', width: '100%',
+    boxSizing: 'border-box',
+  };
+  const labelStyle = { color: C.textMuted, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px', marginBottom: 3, display: 'block' };
+
+  const renderEditFields = () => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
+      {ACCOUNT_EDITABLE_FIELDS.map(f => {
+        const val = form[f.key];
+        const hasSfdc = f.sfdc;
+        return (
+          <div key={f.key} style={{ gridColumn: (f.type === 'textarea') ? '1 / -1' : undefined }}>
+            <label style={labelStyle}>
+              {f.label}{hasSfdc ? <span style={{ color: C.blue, marginLeft: 4, fontSize: 9 }}>SFDC</span> : null}
+            </label>
+            {f.type === 'select' ? (
+              <select
+                value={val ?? ''}
+                onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                style={{ ...inputStyle, cursor: 'pointer' }}
+              >
+                {f.options.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+              </select>
+            ) : f.type === 'textarea' ? (
+              <textarea
+                value={val ?? ''}
+                onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                rows={3}
+                style={{ ...inputStyle, resize: 'vertical' }}
+              />
+            ) : f.type === 'checkbox' ? (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={!!val}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.checked }))}
+                  style={{ width: 14, height: 14, cursor: 'pointer' }}
+                />
+                <span style={{ color: C.textSec, fontSize: 12 }}>{val ? 'Yes' : 'No'}</span>
+              </label>
+            ) : (
+              <input
+                type={f.type === 'number' ? 'number' : 'text'}
+                value={val ?? ''}
+                onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                style={inputStyle}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} wide>
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 4 }}>Account Detail</div>
+          <div style={{ color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 4 }}>
+            Account Detail {editing && <span style={{ color: C.amber, marginLeft: 6 }}>— Editing</span>}
+          </div>
           <h2 style={{ margin: 0, color: C.textPri, fontSize: 18, fontWeight: 700 }}>
             {isLoading ? '…' : (acc?.name || 'Account')}
           </h2>
         </div>
-        <CloseBtn onClose={onClose} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!isLoading && acc && !editing && (
+            <button
+              onClick={() => { setEditing(true); setSaveMsg(null); }}
+              style={{
+                background: C.accent + '22', color: C.accent,
+                border: `1px solid ${C.accent}55`, borderRadius: 7,
+                padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              ✎ Edit
+            </button>
+          )}
+          <CloseBtn onClose={onClose} />
+        </div>
       </div>
 
       {isLoading && <LoadingSpinner />}
 
       {!isLoading && acc && (
         <>
-          {/* SFDC link */}
-          {acc.sfdc_link && (
+          {/* SFDC link (read mode) */}
+          {!editing && acc.sfdc_link && (
             <a
               href={acc.sfdc_link}
               target="_blank"
@@ -180,9 +316,55 @@ function AccountDetailPopup({ id, onClose }) {
             </a>
           )}
 
-          <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: 4 }}>
-            {renderFields()}
-          </div>
+          {/* Save result banner */}
+          {saveMsg && (
+            <div style={{
+              marginBottom: 12, padding: '7px 12px', borderRadius: 7, fontSize: 12,
+              background: saveMsg.ok ? C.green + '22' : C.red + '22',
+              color: saveMsg.ok ? C.green : C.red,
+              border: `1px solid ${saveMsg.ok ? C.green : C.red}44`,
+            }}>
+              {saveMsg.text}
+            </div>
+          )}
+
+          {/* Edit mode */}
+          {editing ? (
+            <>
+              <div style={{ maxHeight: '58vh', overflowY: 'auto', paddingRight: 4, marginBottom: 14 }}>
+                {renderEditFields()}
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setEditing(false); setSaveMsg(null); }}
+                  style={{
+                    background: 'transparent', color: C.textMuted,
+                    border: `1px solid ${C.border}`, borderRadius: 7,
+                    padding: '7px 16px', fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  style={{
+                    background: saving ? C.surface : C.accent + '33',
+                    color: saving ? C.textMuted : C.accent,
+                    border: `1px solid ${saving ? C.border : C.accent + '66'}`,
+                    borderRadius: 7, padding: '7px 20px', fontSize: 12, fontWeight: 700,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {saving ? '⟳ Saving…' : '💾 Save to DB + SFDC'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ maxHeight: '62vh', overflowY: 'auto', paddingRight: 4 }}>
+              {renderReadFields()}
+            </div>
+          )}
         </>
       )}
 
