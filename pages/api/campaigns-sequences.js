@@ -62,7 +62,7 @@ export default async function handler(req, res) {
 
     // Fetch all enabled sequences
     const allSequences = [];
-    let currentUrl = `${OUTREACH_BASE}/sequences?filter[enabled]=true&page[limit]=100`;
+    let currentUrl = `${OUTREACH_BASE}/sequences?page[limit]=100`;
     let pages = 0;
     while (currentUrl && pages < 20) {
       const res2 = await fetch(currentUrl, {
