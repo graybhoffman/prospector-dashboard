@@ -6192,6 +6192,614 @@ function ReferencesSearchSection() {
   );
 }
 
+// ─── Campaigns Tab ────────────────────────────────────────────────────────────
+function CampaignsTab() {
+  // ── Overview metrics ──────────────────────────────────────────────────────
+  const { data: overview, isLoading: ovLoading, mutate: refreshOverview } =
+    useSWR('/api/campaigns-overview', fetcher, { revalidateOnFocus: false, refreshInterval: 5 * 60 * 1000 });
+
+  // ── Active Sequences ──────────────────────────────────────────────────────
+  const { data: sequences, isLoading: seqLoading, mutate: refreshSequences } =
+    useSWR('/api/campaigns-sequences', fetcher, { revalidateOnFocus: false });
+
+  const [expandedSeq, setExpandedSeq] = useState(null);
+  const [seqProspects, setSeqProspects] = useState({}); // { [seqId]: { prospects, total, page, loading } }
+
+  async function loadProspects(seqId, page = 1) {
+    setSeqProspects(prev => ({
+      ...prev,
+      [seqId]: { ...(prev[seqId] || {}), loading: true },
+    }));
+    try {
+      const res = await fetch(`/api/campaigns-sequence-prospects?sequenceId=${seqId}&state=active&page=${page}&limit=25`);
+      const data = await res.json();
+      setSeqProspects(prev => {
+        const existing = prev[seqId]?.prospects || [];
+        const allProspects = page === 1 ? data.prospects : [...existing, ...data.prospects];
+        return {
+          ...prev,
+          [seqId]: { prospects: allProspects, total: data.total, page, loading: false },
+        };
+      });
+    } catch (err) {
+      setSeqProspects(prev => ({
+        ...prev,
+        [seqId]: { ...(prev[seqId] || {}), loading: false, error: err.message },
+      }));
+    }
+  }
+
+  function toggleSequence(seqId) {
+    if (expandedSeq === seqId) {
+      setExpandedSeq(null);
+    } else {
+      setExpandedSeq(seqId);
+      if (!seqProspects[seqId]) {
+        loadProspects(seqId, 1);
+      }
+    }
+  }
+
+  // ── Enroll Tool ───────────────────────────────────────────────────────────
+  const [enrollFilters, setEnrollFilters] = useState({ ehr: '', stage: '', state: '' });
+  const [searchResults, setSearchResults] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [selectedAccountIds, setSelectedAccountIds] = useState(new Set());
+  const [targetSeqId, setTargetSeqId] = useState('');
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollResult, setEnrollResult] = useState(null);
+
+  async function findContacts() {
+    setSearchLoading(true);
+    setSearchResults(null);
+    setSelectedAccountIds(new Set());
+    setEnrollResult(null);
+    try {
+      const scope = enrollFilters.stage === 'Prospect' ? 'all' : 'pipeline';
+      const parts = [];
+      if (enrollFilters.ehr && enrollFilters.ehr !== 'All') parts.push(enrollFilters.ehr);
+      if (enrollFilters.stage && enrollFilters.stage !== 'All') parts.push(enrollFilters.stage);
+      if (enrollFilters.state) parts.push(`in ${enrollFilters.state}`);
+      const q = parts.join(' ') || 'all accounts';
+
+      const res = await fetch('/api/smart-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, scope }),
+      });
+      const data = await res.json();
+      setSearchResults(data);
+    } catch (err) {
+      setSearchResults({ error: err.message });
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  function toggleAccount(id) {
+    setSelectedAccountIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllAccounts() {
+    const accounts = searchResults?.accounts || [];
+    if (selectedAccountIds.size === accounts.length) {
+      setSelectedAccountIds(new Set());
+    } else {
+      setSelectedAccountIds(new Set(accounts.map(a => a.id)));
+    }
+  }
+
+  async function enrollSelected() {
+    if (!targetSeqId || selectedAccountIds.size === 0) return;
+    setEnrolling(true);
+    setEnrollResult(null);
+    try {
+      const res = await fetch('/api/enroll-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountIds: Array.from(selectedAccountIds),
+          sequenceId: Number(targetSeqId),
+        }),
+      });
+      const data = await res.json();
+      setEnrollResult(data);
+      // Refresh sequences after enrollment
+      refreshSequences();
+    } catch (err) {
+      setEnrollResult({ error: err.message, enrolled: 0, skipped: 0, errors: [err.message] });
+    } finally {
+      setEnrolling(false);
+    }
+  }
+
+  const estimatedContacts = Array.from(selectedAccountIds).reduce((sum, id) => {
+    const acc = searchResults?.accounts?.find(a => a.id === id);
+    return sum + (acc?.contact_count || acc?.num_contacts || 2);
+  }, 0);
+
+  // ── Badge helper ──────────────────────────────────────────────────────────
+  const badge = (count, color, label) => (
+    <span style={{
+      fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4,
+      background: color + '22', color, border: `1px solid ${color}44`,
+      marginLeft: 4,
+    }}>{count} {label}</span>
+  );
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '12px 0' }}>
+
+      {/* ── Section 1: Overview Cards ─────────────────────────────────────── */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px' }}>
+            🎯 Campaigns
+          </h2>
+          <button
+            onClick={() => { refreshOverview(); refreshSequences(); }}
+            style={{
+              background: C.card, border: `1px solid ${C.border}`, color: C.textSec,
+              borderRadius: 7, padding: '5px 14px', cursor: 'pointer', fontSize: 12,
+            }}
+          >⟳ Refresh</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <ActivityMetricCard
+            emoji="🎯" label="Active Contacts"
+            value={overview?.activeContacts ?? 0}
+            loading={ovLoading}
+          />
+          <ActivityMetricCard
+            emoji="🏢" label="Active Accounts"
+            value={overview?.activeAccounts ?? 0}
+            loading={ovLoading}
+          />
+          <ActivityMetricCard
+            emoji="📞" label="Reached (30d)"
+            value={overview?.prospectsReached30d ?? 0}
+            loading={ovLoading}
+          />
+          <ActivityMetricCard
+            emoji="⚡" label="Touchpoints (30d)"
+            value={overview?.totalTouchpoints30d ?? 0}
+            loading={ovLoading}
+          />
+        </div>
+        {overview?.updatedAt && (
+          <div style={{ color: C.textMuted, fontSize: 11, marginTop: 8 }}>
+            Updated {new Date(overview.updatedAt).toLocaleTimeString()}
+            {overview.stale && <span style={{ color: C.amber }}> (stale)</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Section 2: Active Sequences ───────────────────────────────────── */}
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: '16px 20px', marginBottom: 28,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.textPri }}>Active Sequences</h3>
+          <button
+            onClick={() => refreshSequences()}
+            style={{
+              background: C.card, border: `1px solid ${C.border}`, color: C.textSec,
+              borderRadius: 7, padding: '4px 12px', cursor: 'pointer', fontSize: 12,
+            }}
+          >⟳</button>
+        </div>
+
+        {seqLoading && (
+          <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
+            ⟳ Loading sequences…
+          </div>
+        )}
+
+        {!seqLoading && (!sequences || sequences.length === 0) && (
+          <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
+            No active sequences found for the agents team.
+          </div>
+        )}
+
+        {!seqLoading && sequences?.error && (
+          <div style={{ color: C.red, fontSize: 13 }}>⚠ {sequences.error}</div>
+        )}
+
+        {Array.isArray(sequences) && sequences.map((seq) => {
+          const isExpanded = expandedSeq === seq.id;
+          const pd = seqProspects[seq.id];
+          return (
+            <div key={seq.id} style={{
+              border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 8,
+              background: C.card, overflow: 'hidden',
+            }}>
+              {/* Sequence header row */}
+              <div
+                onClick={() => toggleSequence(seq.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px', cursor: 'pointer',
+                  background: isExpanded ? C.cardHover : C.card,
+                  transition: 'background 0.15s',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ color: C.textPri, fontWeight: 700, fontSize: 13, marginRight: 8 }}>
+                    {seq.name}
+                  </span>
+                  <span style={{ color: C.textMuted, fontSize: 11 }}>{seq.ownerName}</span>
+                  <div style={{ marginTop: 4 }}>
+                    {badge(seq.activeCount, C.green, 'active')}
+                    {seq.finishedCount > 0 && badge(seq.finishedCount, C.textMuted, 'finished')}
+                    {seq.bouncedCount > 0 && badge(seq.bouncedCount, C.red, 'bounced')}
+                    {seq.optedOutCount > 0 && badge(seq.optedOutCount, C.amber, 'opted out')}
+                  </div>
+                </div>
+                <span style={{
+                  color: C.textMuted, fontSize: 18, transition: 'transform 0.2s',
+                  transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                  flexShrink: 0, marginLeft: 12,
+                }}>⌄</span>
+              </div>
+
+              {/* Expanded prospects table */}
+              {isExpanded && (
+                <div style={{ borderTop: `1px solid ${C.border}`, padding: '12px 14px' }}>
+                  {pd?.loading && (
+                    <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '12px 0' }}>
+                      ⟳ Loading prospects…
+                    </div>
+                  )}
+                  {pd?.error && (
+                    <div style={{ color: C.red, fontSize: 12 }}>⚠ {pd.error}</div>
+                  )}
+                  {pd?.prospects && pd.prospects.length === 0 && (
+                    <div style={{ color: C.textMuted, fontSize: 12, textAlign: 'center', padding: '12px 0' }}>
+                      No prospects found.
+                    </div>
+                  )}
+                  {pd?.prospects && pd.prospects.length > 0 && (
+                    <>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              {['Name','Email','Title','Account','State','Days In'].map(h => (
+                                <th key={h} style={{
+                                  textAlign: 'left', padding: '5px 8px',
+                                  color: C.textMuted, fontWeight: 600, fontSize: 10,
+                                  textTransform: 'uppercase', letterSpacing: '0.5px',
+                                  borderBottom: `1px solid ${C.border}`,
+                                }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pd.prospects.map((p, i) => (
+                              <tr key={p.stateId || i} style={{
+                                borderBottom: `1px solid ${C.borderSub}`,
+                                background: i % 2 === 0 ? 'transparent' : C.surface + '66',
+                              }}>
+                                <td style={{ padding: '6px 8px', color: C.textPri, fontWeight: 600 }}>
+                                  {p.name || '—'}
+                                </td>
+                                <td style={{ padding: '6px 8px', color: C.textSec }}>
+                                  {p.email || '—'}
+                                </td>
+                                <td style={{ padding: '6px 8px', color: C.textSec }}>
+                                  {p.title || '—'}
+                                </td>
+                                <td style={{ padding: '6px 8px', color: C.textSec }}>
+                                  {p.accountName || '—'}
+                                </td>
+                                <td style={{ padding: '6px 8px' }}>
+                                  <span style={{
+                                    fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 3,
+                                    background: C.green + '22', color: C.green,
+                                  }}>{p.sequenceState}</span>
+                                </td>
+                                <td style={{ padding: '6px 8px', color: C.textMuted }}>
+                                  {p.daysInSequence != null ? `${p.daysInSequence}d` : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {pd.prospects.length < pd.total && (
+                        <div style={{ textAlign: 'center', marginTop: 10 }}>
+                          <button
+                            onClick={() => loadProspects(seq.id, (pd.page || 1) + 1)}
+                            disabled={pd.loading}
+                            style={{
+                              background: C.card, border: `1px solid ${C.border}`, color: C.accent,
+                              borderRadius: 7, padding: '5px 16px', cursor: 'pointer', fontSize: 12,
+                            }}
+                          >
+                            {pd.loading ? 'Loading…' : `Load more (${pd.total - pd.prospects.length} remaining)`}
+                          </button>
+                        </div>
+                      )}
+                      <div style={{ color: C.textMuted, fontSize: 11, marginTop: 8 }}>
+                        Showing {pd.prospects.length} of {pd.total} prospects
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Section 3: Enroll Contacts Tool ──────────────────────────────── */}
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: '16px 20px',
+      }}>
+        <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700, color: C.textPri }}>
+          ➕ Enroll in Sequence
+        </h3>
+        <p style={{ margin: '0 0 16px 0', color: C.textSec, fontSize: 13 }}>
+          Filter accounts and contacts, then add them to an existing Outreach sequence.
+        </p>
+
+        {/* Step 1: Filter */}
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          padding: '14px 16px', marginBottom: 16,
+        }}>
+          <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 12 }}>
+            Step 1 — Filter Accounts
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 4 }}>EHR</div>
+              <select
+                value={enrollFilters.ehr}
+                onChange={e => setEnrollFilters(f => ({ ...f, ehr: e.target.value }))}
+                style={{
+                  background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+                  borderRadius: 6, padding: '6px 10px', fontSize: 13,
+                }}
+              >
+                <option value="">All EHRs</option>
+                {['eCW','Athena','ModMed','MEDITECH','AdvancedMD'].map(e => (
+                  <option key={e} value={e}>{e}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 4 }}>Stage</div>
+              <select
+                value={enrollFilters.stage}
+                onChange={e => setEnrollFilters(f => ({ ...f, stage: e.target.value }))}
+                style={{
+                  background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+                  borderRadius: 6, padding: '6px 10px', fontSize: 13,
+                }}
+              >
+                <option value="">All Stages</option>
+                {['Prospect','Outreach','Discovery','SQL'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 4 }}>State</div>
+              <input
+                type="text"
+                placeholder="e.g. TX, Florida"
+                value={enrollFilters.state}
+                onChange={e => setEnrollFilters(f => ({ ...f, state: e.target.value }))}
+                style={{
+                  background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+                  borderRadius: 6, padding: '6px 10px', fontSize: 13, width: 140,
+                }}
+              />
+            </div>
+            <button
+              onClick={findContacts}
+              disabled={searchLoading}
+              style={{
+                background: C.accent, border: 'none', color: '#fff',
+                borderRadius: 7, padding: '7px 18px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}
+            >
+              {searchLoading ? '⟳ Searching…' : 'Find Contacts'}
+            </button>
+          </div>
+        </div>
+
+        {/* Step 2: Select contacts */}
+        {searchResults && !searchResults.error && (
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '14px 16px', marginBottom: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Step 2 — Select Accounts
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: C.textSec, fontSize: 12 }}>
+                  {selectedAccountIds.size} selected, ~{estimatedContacts} contacts
+                </span>
+                <button
+                  onClick={toggleAllAccounts}
+                  style={{
+                    background: C.surface, border: `1px solid ${C.border}`, color: C.accent,
+                    borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12,
+                  }}
+                >
+                  {selectedAccountIds.size === (searchResults.accounts?.length || 0) ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
+            </div>
+
+            {searchResults.accounts?.length === 0 && (
+              <div style={{ color: C.textMuted, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
+                No accounts found matching your filters.
+              </div>
+            )}
+
+            {searchResults.accounts && searchResults.accounts.length > 0 && (
+              <div style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 30, padding: '5px 8px', borderBottom: `1px solid ${C.border}` }}></th>
+                      {['Account Name','Stage','EHR','State'].map(h => (
+                        <th key={h} style={{
+                          textAlign: 'left', padding: '5px 8px',
+                          color: C.textMuted, fontWeight: 600, fontSize: 10,
+                          textTransform: 'uppercase', letterSpacing: '0.5px',
+                          borderBottom: `1px solid ${C.border}`,
+                        }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResults.accounts.map((acc, i) => {
+                      const isSelected = selectedAccountIds.has(acc.id);
+                      return (
+                        <tr
+                          key={acc.id}
+                          onClick={() => toggleAccount(acc.id)}
+                          style={{
+                            borderBottom: `1px solid ${C.borderSub}`,
+                            background: isSelected ? C.accent + '15' : (i % 2 === 0 ? 'transparent' : C.surface + '44'),
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleAccount(acc.id)}
+                              onClick={e => e.stopPropagation()}
+                              style={{ accentColor: C.accent, cursor: 'pointer' }}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px', color: C.textPri, fontWeight: 600 }}>
+                            {acc.name || acc.account_name || '—'}
+                          </td>
+                          <td style={{ padding: '6px 8px', color: C.textSec }}>
+                            {acc.agents_stage || acc.stage || '—'}
+                          </td>
+                          <td style={{ padding: '6px 8px', color: C.textSec }}>
+                            {acc.ehr_system || acc.ehr || '—'}
+                          </td>
+                          <td style={{ padding: '6px 8px', color: C.textMuted }}>
+                            {acc.billing_state || acc.state || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {searchResults?.error && (
+          <div style={{
+            background: C.red + '15', border: `1px solid ${C.red}44`, borderRadius: 8,
+            padding: '10px 14px', marginBottom: 16, color: C.red, fontSize: 13,
+          }}>
+            ⚠ Search error: {searchResults.error}
+          </div>
+        )}
+
+        {/* Step 3: Enroll */}
+        {selectedAccountIds.size > 0 && (
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '14px 16px',
+          }}>
+            <div style={{ color: C.textMuted, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 12 }}>
+              Step 3 — Enroll in Sequence
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div>
+                <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 4 }}>Target Sequence</div>
+                <select
+                  value={targetSeqId}
+                  onChange={e => setTargetSeqId(e.target.value)}
+                  style={{
+                    background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+                    borderRadius: 6, padding: '6px 10px', fontSize: 13, minWidth: 280,
+                  }}
+                >
+                  <option value="">Select a sequence…</option>
+                  {Array.isArray(sequences) && sequences.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.ownerName}) — {s.activeCount} active
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={enrollSelected}
+                disabled={enrolling || !targetSeqId}
+                style={{
+                  background: targetSeqId ? C.green : C.border,
+                  border: 'none', color: targetSeqId ? '#fff' : C.textMuted,
+                  borderRadius: 7, padding: '7px 18px', cursor: targetSeqId ? 'pointer' : 'not-allowed',
+                  fontSize: 13, fontWeight: 600,
+                }}
+              >
+                {enrolling ? '⟳ Enrolling…' : `Enroll ${selectedAccountIds.size} Account${selectedAccountIds.size !== 1 ? 's' : ''} (~${estimatedContacts} contacts)`}
+              </button>
+            </div>
+
+            {enrollResult && (
+              <div style={{
+                marginTop: 12,
+                background: enrollResult.error ? C.red + '15' : C.green + '15',
+                border: `1px solid ${enrollResult.error ? C.red : C.green}44`,
+                borderRadius: 8, padding: '10px 14px',
+              }}>
+                {enrollResult.error ? (
+                  <span style={{ color: C.red }}>⚠ Error: {enrollResult.error}</span>
+                ) : (
+                  <div>
+                    <span style={{ color: C.green, fontWeight: 700 }}>
+                      ✅ Enrolled {enrollResult.enrolled} contacts
+                    </span>
+                    {enrollResult.skipped > 0 && (
+                      <span style={{ color: C.amber, marginLeft: 12 }}>
+                        ⚠ {enrollResult.skipped} already enrolled / skipped
+                      </span>
+                    )}
+                    {enrollResult.errors?.length > 0 && (
+                      <details style={{ marginTop: 6 }}>
+                        <summary style={{ color: C.red, fontSize: 12, cursor: 'pointer' }}>
+                          {enrollResult.errors.length} error{enrollResult.errors.length !== 1 ? 's' : ''}
+                        </summary>
+                        <ul style={{ margin: '6px 0 0 0', padding: '0 0 0 16px', color: C.textSec, fontSize: 11 }}>
+                          {enrollResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReferencesTab() {
   const [viewingAccountId, setViewingAccountId] = useState(null);
 
@@ -6394,6 +7002,7 @@ export default function Home() {
               {tabBtn('contacts', '👥 Contacts')}
               {tabBtn('opportunities', '💼 Opportunities')}
               {tabBtn('activities', '📞 Activities')}
+              {tabBtn('campaigns', '🎯 Campaigns')}
               {tabBtn('references', '📍 References')}
               {tabBtn('manage', '⚙️ Manage')}
             </div>
@@ -6488,6 +7097,9 @@ export default function Home() {
 
         {/* ── Activities Tab ── */}
         {activeTab === 'activities' && <ActivitiesDataTab />}
+
+        {/* ── Campaigns Tab ── */}
+        {activeTab === 'campaigns' && <CampaignsTab />}
 
         {/* ── References Tab ── */}
         {activeTab === 'references' && <ReferencesTab />}
