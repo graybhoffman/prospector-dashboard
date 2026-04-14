@@ -4841,6 +4841,33 @@ function ContactsDataTab() {
 }
 
 function OpportunitiesDataTab() {
+  const [view, setView] = useState('kanban');
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      {/* View toggle */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
+        {[['kanban', '🗂️ Kanban'], ['table', '📋 Table']].map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            style={{
+              background: view === id ? C.accent + '22' : 'transparent',
+              color: view === id ? C.accent : C.textSec,
+              border: `1px solid ${view === id ? C.accent + '66' : 'transparent'}`,
+              borderRadius: 7, padding: '5px 14px', cursor: 'pointer',
+              fontSize: 12, fontWeight: view === id ? 600 : 400, transition: 'all 0.15s',
+            }}
+          >{label}</button>
+        ))}
+      </div>
+
+      {view === 'kanban' ? <OpportunitiesKanbanSection /> : <OpportunitiesTableView />}
+    </div>
+  );
+}
+
+function OpportunitiesTableView() {
   const fmtAcv = (n) => {
     if (n == null || n === '') return '—';
     if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -4932,6 +4959,295 @@ function OpportunitiesDataTab() {
           { label: 'Missing ACV',  params: { missing_acv: 'true' } },
         ]}
       />
+    </div>
+  );
+}
+
+// ─── Opportunities Kanban Section ─────────────────────────────────────────────
+function OpportunitiesKanbanSection() {
+  const [ownerFilter, setOwnerFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  const { data, isLoading, error } = useSWR(
+    '/api/opportunities?active_only=true&pageSize=200',
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 60_000 }
+  );
+
+  const all = data?.opportunities || [];
+
+  // Derive owner list
+  const owners = useMemo(() => {
+    const s = new Set(all.map((o) => o.owner).filter(Boolean));
+    return ['all', ...Array.from(s).sort()];
+  }, [all]);
+
+  // Filter
+  const filtered = useMemo(() => {
+    let rows = all;
+    if (ownerFilter !== 'all') rows = rows.filter((o) => o.owner === ownerFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter(
+        (o) =>
+          (o.account_name || '').toLowerCase().includes(q) ||
+          (o.name || '').toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [all, ownerFilter, search]);
+
+  const KANBAN_STAGES = ['Discovery', 'SQL', 'Negotiations', 'Closed-Won'];
+  const SUMMARY_STAGES = ['Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Closed-Lost'];
+
+  const STAGE_COL = {
+    'Discovery':   '#3b82f6',
+    'SQL':         '#f59e0b',
+    'Negotiations':'#8b5cf6',
+    'Closed-Won':  '#10b981',
+    'Closed-Lost': '#ef4444',
+  };
+
+  function fmtAcv(n) {
+    if (!n || n === 0) return null;
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+    return `$${n}`;
+  }
+
+  function fmtDate(d) {
+    if (!d) return null;
+    try {
+      return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+    } catch { return d; }
+  }
+
+  // Owner chip colors (cycle through palette)
+  const ownerColors = useMemo(() => {
+    const palette = [C.accent, C.blue, C.purple, C.amber, C.teal, C.pink, C.green];
+    const map = {};
+    owners.filter((o) => o !== 'all').forEach((o, i) => {
+      map[o] = palette[i % palette.length];
+    });
+    return map;
+  }, [owners]);
+
+  // Summary stats per stage
+  function stageStats(stageName) {
+    const rows = filtered.filter((o) => o.stage_normalized === stageName);
+    const count = rows.length;
+    const acv = rows.reduce((sum, o) => sum + (Number(o.amount) || 0), 0);
+    return { count, acv };
+  }
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+        Loading opportunities…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: C.red, fontSize: 13 }}>
+        Failed to load opportunities.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+
+      {/* ── Stage Summary Bar ── */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        {SUMMARY_STAGES.map((stage) => {
+          const { count, acv } = stageStats(stage);
+          const color = STAGE_COL[stage];
+          return (
+            <div key={stage} style={{
+              background: C.card, border: `1px solid ${color}44`,
+              borderRadius: 10, padding: '12px 18px', flex: '1 1 140px', minWidth: 120,
+              borderTop: `3px solid ${color}`,
+            }}>
+              <div style={{ color, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+                {stage}
+              </div>
+              <div style={{ color: C.textPri, fontSize: 22, fontWeight: 800, lineHeight: 1 }}>
+                {count}
+              </div>
+              <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>
+                {acv > 0 ? fmtAcv(acv) : 'No ACV'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Filter Bar ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="Search account or opp name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 7,
+            color: C.textPri, padding: '6px 12px', fontSize: 12, outline: 'none',
+            width: 230,
+          }}
+        />
+        {/* Owner filter */}
+        <select
+          value={ownerFilter}
+          onChange={(e) => setOwnerFilter(e.target.value)}
+          style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 7,
+            color: ownerFilter !== 'all' ? C.accent : C.textSec,
+            padding: '6px 10px', fontSize: 12, outline: 'none', cursor: 'pointer',
+            fontWeight: ownerFilter !== 'all' ? 600 : 400,
+          }}
+        >
+          <option value="all">All Owners</option>
+          {owners.filter((o) => o !== 'all').map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+        {/* Result count */}
+        <span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>
+          {filtered.length} opp{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* ── Kanban Board ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${KANBAN_STAGES.length}, minmax(220px, 1fr))`,
+        gap: 12,
+        overflowX: 'auto',
+        paddingBottom: 8,
+      }}>
+        {KANBAN_STAGES.map((stage) => {
+          const color = STAGE_COL[stage];
+          const cards = filtered
+            .filter((o) => o.stage_normalized === stage)
+            .sort((a, b) => {
+              if (!a.close_date) return 1;
+              if (!b.close_date) return -1;
+              return new Date(a.close_date) - new Date(b.close_date);
+            });
+
+          return (
+            <div key={stage} style={{
+              background: C.surface, border: `1px solid ${C.border}`,
+              borderRadius: 12, display: 'flex', flexDirection: 'column',
+              minHeight: 200, overflow: 'hidden',
+            }}>
+              {/* Column header */}
+              <div style={{
+                padding: '10px 14px', borderBottom: `1px solid ${C.border}`,
+                background: color + '14', display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', gap: 8,
+              }}>
+                <span style={{ color, fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  {stage}
+                </span>
+                <span style={{
+                  background: color + '22', color, borderRadius: 20,
+                  padding: '1px 8px', fontSize: 11, fontWeight: 700,
+                }}>
+                  {cards.length}
+                </span>
+              </div>
+
+              {/* Cards */}
+              <div style={{ padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                {cards.length === 0 && (
+                  <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', padding: '20px 0' }}>
+                    No opps
+                  </div>
+                )}
+                {cards.map((opp) => {
+                  const acvStr = fmtAcv(Number(opp.amount));
+                  const ownerColor = ownerColors[opp.owner] || C.textMuted;
+                  const closeStr = fmtDate(opp.close_date);
+
+                  return (
+                    <div key={opp.id} style={{
+                      background: C.card, border: `1px solid ${C.border}`,
+                      borderRadius: 10, padding: '10px 12px',
+                      transition: 'border-color 0.15s, background 0.15s',
+                      cursor: 'default',
+                    }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = color + '66';
+                        e.currentTarget.style.background = C.cardHover;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = C.border;
+                        e.currentTarget.style.background = C.card;
+                      }}
+                    >
+                      {/* Account name + SFDC link */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 3 }}>
+                        <span style={{ color: C.textPri, fontWeight: 700, fontSize: 13, lineHeight: 1.3 }}>
+                          {opp.account_name || '—'}
+                        </span>
+                        {opp.sfdc_link && (
+                          <a
+                            href={opp.sfdc_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: C.blue, fontSize: 14, lineHeight: 1, flexShrink: 0, textDecoration: 'none', opacity: 0.7 }}
+                            title="Open in Salesforce"
+                          >↗</a>
+                        )}
+                      </div>
+
+                      {/* Opp name */}
+                      {opp.name && opp.name !== opp.account_name && (
+                        <div style={{ color: C.textMuted, fontSize: 11, marginBottom: 8, lineHeight: 1.3 }}>
+                          {opp.name}
+                        </div>
+                      )}
+
+                      {/* Footer row: owner + amount + close date */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                        {/* Owner badge */}
+                        {opp.owner && (
+                          <span style={{
+                            background: ownerColor + '22', color: ownerColor,
+                            borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {opp.owner.split(' ')[0]}
+                          </span>
+                        )}
+
+                        {/* Amount */}
+                        <span style={{
+                          color: acvStr ? C.green : C.textMuted,
+                          fontWeight: acvStr ? 700 : 400,
+                          fontSize: 11,
+                        }}>
+                          {acvStr || '—'}
+                        </span>
+
+                        {/* Close date */}
+                        {closeStr && (
+                          <span style={{ color: C.textMuted, fontSize: 10, marginLeft: 'auto' }}>
+                            {closeStr}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
