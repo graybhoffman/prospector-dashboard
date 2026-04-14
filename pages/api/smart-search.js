@@ -49,7 +49,7 @@ async function getSfdcSession() {
 async function searchSfdcReferences(filters, limit) {
   const safeLimit = Math.min(limit || 50, 100);
   const { sid, base } = await getSfdcSession();
-  const conditions = ["StageName = 'Closed Won'", "Amount > 0", "Account.Name NOT LIKE '%TERMINATED%'"];
+  const conditions = ["StageName = 'Closed Won'", "Amount > 0", "Account.Name != null"];
   if (filters.state) {
     const stateName = STATE_NAMES[filters.state] || '';
     const stateFilter = stateName
@@ -60,12 +60,23 @@ async function searchSfdcReferences(filters, limit) {
   if (filters.city) {
     conditions.push("Account.BillingCity LIKE '%" + filters.city.replace(/'/g, "\'") + "%'");
   }
-  const soql = "SELECT Id, Name, Amount, CloseDate, Account.Id, Account.Name, Account.BillingCity, Account.BillingState, Account.EHR_System__c FROM Opportunity WHERE " + conditions.join(' AND ') + " ORDER BY Amount DESC, CloseDate DESC LIMIT " + safeLimit;
+  if (filters.ehr) {
+    conditions.push("Account.EHR_System__c LIKE '%" + filters.ehr.replace(/'/g, "\'") + "%'");
+  }
+  const soql = "SELECT Id, Name, Amount, CloseDate, Account.Id, Account.Name, Account.BillingCity, Account.BillingState, Account.EHR_System__c, Account.Specialty__c FROM Opportunity WHERE " + conditions.join(' AND ') + " ORDER BY Amount DESC, CloseDate DESC LIMIT " + safeLimit;
   const url = base + '/services/data/v59.0/query?q=' + encodeURIComponent(soql);
   const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + sid } });
   const data = await resp.json();
   if (!resp.ok) throw new Error((data && data[0] && data[0].message) || 'SFDC query failed');
-  return (data.records || []).map(function(r) {
+  const rawRecords = (data.records || [])
+    .filter(function(r) { return !r.Account || !r.Account.Name || r.Account.Name.toUpperCase().indexOf('TERMINATED') === -1; })
+    .filter(function(r) {
+      if (!filters.specialty) return true;
+      const sp = (r.Account && r.Account.Specialty__c || '').toLowerCase();
+      const nm = (r.Account && r.Account.Name || '').toLowerCase();
+      return sp.indexOf(filters.specialty.toLowerCase()) !== -1 || nm.indexOf(filters.specialty.toLowerCase()) !== -1;
+    });
+  return rawRecords.map(function(r) {
     return {
       id: r.Id,
       name: r.Name,
