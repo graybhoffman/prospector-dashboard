@@ -63,7 +63,7 @@ async function searchSfdcReferences(filters, limit) {
   if (filters.ehr) {
     conditions.push("Account.EHR_System__c LIKE '%" + filters.ehr.replace(/'/g, "\'") + "%'");
   }
-  const soql = "SELECT Id, Name, Amount, CloseDate, Account.Id, Account.Name, Account.BillingCity, Account.BillingState, Account.EHR_System__c, Account.Specialty__c FROM Opportunity WHERE " + conditions.join(' AND ') + " ORDER BY Amount DESC, CloseDate DESC LIMIT " + safeLimit;
+  const soql = "SELECT Id, Name, Amount, CloseDate, Account.Id, Account.Name, Account.BillingCity, Account.BillingState, Account.EHR_System__c, Account.Account_Specialty__c FROM Opportunity WHERE " + conditions.join(' AND ') + " ORDER BY Amount DESC, CloseDate DESC LIMIT " + safeLimit;
   const url = base + '/services/data/v59.0/query?q=' + encodeURIComponent(soql);
   const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + sid } });
   const data = await resp.json();
@@ -72,7 +72,7 @@ async function searchSfdcReferences(filters, limit) {
     .filter(function(r) { return !r.Account || !r.Account.Name || r.Account.Name.toUpperCase().indexOf('TERMINATED') === -1; })
     .filter(function(r) {
       if (!filters.specialty) return true;
-      const sp = (r.Account && r.Account.Specialty__c || '').toLowerCase();
+      const sp = (r.Account && r.Account.Account_Specialty__c || '').toLowerCase();
       const nm = (r.Account && r.Account.Name || '').toLowerCase();
       return sp.indexOf(filters.specialty.toLowerCase()) !== -1 || nm.indexOf(filters.specialty.toLowerCase()) !== -1;
     });

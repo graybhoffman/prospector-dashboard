@@ -79,7 +79,7 @@ const SFDC_MAP = {
   num_employees:        'NumberOfEmployees',
   annual_revenue:       'AnnualRevenue',
   ehr_system:           'EHR_System__c',
-  specialty:            'Specialty__c',
+  specialty:            'Account_Specialty__c',
 };
 
 function cors(res) {
