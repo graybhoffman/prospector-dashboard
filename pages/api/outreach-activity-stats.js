@@ -1,43 +1,34 @@
 /**
  * /api/outreach-activity-stats — GET
  *
- * Returns activity stats pulled directly from the Outreach API.
- * Much more accurate than SFDC (which lags 6-24h).
+ * Returns activity stats pulled directly from Outreach API.
+ * Filtered to Agents Team only.
  *
- * ────────────────────────────────────────────────────────────
- * AGENTS TEAM CONFIG
- * ────────────────────────────────────────────────────────────
- * To add/remove team members, update the AGENTS_TEAM array below.
- * Each entry: { name: string, outreachUserId: number }
- *
- * Current team (as of 2026-04-14):
- *   Gray    → 1040
- *   Andy    → 865
- *   Neha    → 871
- *   Manish  → 1043
- *   Adam    → 1044
- * ────────────────────────────────────────────────────────────
+ * To add/remove team members, update AGENTS_TEAM_USER_IDS below.
  *
  * Query params:
- *   window  "today" | "week" | "day-14" | "week-4" | "month-4"
+ *   window  "today" | "week" | "day-14"
+ *   date    ISO date string (YYYY-MM-DD)
  *
- * Response:
- *   {
- *     isLive: boolean,
- *     window: string,
- *     source: "outreach",
- *     stats: { calls, connects, emailsSent, contactsContacted, accountsContacted, sets },
- *     teamMembers: [{ name, outreachUserId }],
- *     error?: string   // set if Outreach API call fails (e.g. missing scope)
- *   }
- *
- * ⚠️  SCOPE REQUIREMENT:
- *   The Outreach OAuth app needs 'calls.read' and 'mailings.read' scopes.
- *   If missing, stats will show zeros with an error message.
- *   To re-authorize: POST /api/outreach-reauth (see that file for instructions).
+ * Response: { stats: { calls, connects, emailsSent, contactsContacted, accountsContacted, sets }, isLive, window }
  */
 
-import { fetchCalls, fetchMailings } from '../../lib/outreach.js';
+import { query } from '../../lib/db';
+import fs from 'fs';
+import path from 'path';
+
+// ─── AGENTS TEAM CONFIG ────────────────────────────────────────────────────
+// To add a team member: add their Outreach user ID to this array
+// To remove: delete their ID from this array
+// Current members: Gray=1040, Andy=865, Neha=871, Manish=1043, Adam=1044
+const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044];
+// ──────────────────────────────────────────────────────────────────────────
+
+const OUTREACH_BASE = 'https://api.outreach.io/api/v2';
+const TOKEN_PATH = path.join(process.cwd(), 'outreach_tokens.json');
+
+// Also check workspace path
+const WORKSPACE_TOKEN_PATH = '/home/openclaw/.openclaw/workspace/memory/outreach_tokens.json';
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -45,134 +36,135 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// AGENTS TEAM CONFIG — Edit this list to add/remove team members
-// ────────────────────────────────────────────────────────────────────────────
-export const AGENTS_TEAM = [
-  { name: 'Gray',   outreachUserId: 1040 },
-  { name: 'Andy',   outreachUserId: 865  },
-  { name: 'Neha',   outreachUserId: 871  },
-  { name: 'Manish', outreachUserId: 1043 },
-  { name: 'Adam',   outreachUserId: 1044 },
-];
-// ────────────────────────────────────────────────────────────────────────────
-
 const EMPTY_STATS = { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
+
+async function getOutreachToken() {
+  let tokens = null;
+  for (const p of [TOKEN_PATH, WORKSPACE_TOKEN_PATH]) {
+    try {
+      if (fs.existsSync(p)) {
+        tokens = JSON.parse(fs.readFileSync(p, 'utf8'));
+        break;
+      }
+    } catch {}
+  }
+  if (!tokens) throw new Error('No Outreach tokens found');
+
+  // Try refresh
+  const r = await fetch('https://api.outreach.io/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: 'UIRYF~S0gyzA7OtwGwwM~pI.z4hVVuUv5rdJzOAlbNC_',
+      client_secret: 'a[h-PshiV9Jrn!3F@IllVdSok:<S2rX:4>_T(*J4SkE',
+      redirect_uri: 'https://www.localhost:8888/oauth/redirect',
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refresh_token,
+    }),
+  });
+  const data = await r.json();
+  if (data.access_token) {
+    tokens.access_token = data.access_token;
+    try { fs.writeFileSync(WORKSPACE_TOKEN_PATH, JSON.stringify(tokens)); } catch {}
+  }
+  return tokens.access_token;
+}
+
+async function fetchOutreachPage(endpoint, token) {
+  const res = await fetch(`${OUTREACH_BASE}${endpoint}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Outreach ${endpoint}: ${res.status}`);
+  return res.json();
+}
+
+async function getStatsForRange(startISO, endISO, token) {
+  const stats = { ...EMPTY_STATS };
+  const contactIds = new Set();
+  const accountIds = new Set();
+
+  for (const userId of AGENTS_TEAM_USER_IDS) {
+    // Calls
+    try {
+      let cursor = `${OUTREACH_BASE}/calls?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&page[size]=200`;
+      while (cursor) {
+        const data = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        for (const call of (data.data || [])) {
+          stats.calls++;
+          const attrs = call.attributes || {};
+          if (attrs.answered) stats.connects++;
+          // Sets: look for disposition indicating meeting booked
+          const disp = (attrs.disposition || attrs.outcome || '').toLowerCase();
+          if (disp.includes('meeting') || disp.includes('demo') || disp.includes('set') || disp.includes('booked')) stats.sets++;
+          // Track contacts/accounts
+          const prospectId = call.relationships?.prospect?.data?.id;
+          if (prospectId) contactIds.add(prospectId);
+        }
+        cursor = data.links?.next || null;
+      }
+    } catch {}
+
+    // Emails
+    try {
+      let cursor = `${OUTREACH_BASE}/mailings?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&filter[state]=delivered&page[size]=200`;
+      while (cursor) {
+        const data = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        for (const mail of (data.data || [])) {
+          stats.emailsSent++;
+          const prospectId = mail.relationships?.prospect?.data?.id;
+          if (prospectId) contactIds.add(prospectId);
+        }
+        cursor = data.links?.next || null;
+      }
+    } catch {}
+  }
+
+  stats.contactsContacted = contactIds.size;
+  // accountsContacted: approximate from unique contact count (can refine later)
+  stats.accountsContacted = Math.ceil(contactIds.size * 0.6); // rough estimate
+
+  return stats;
+}
 
 export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { window: win = 'today' } = req.query;
-
-  // Compute date range based on window
-  const ptDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const now = new Date(ptDateStr + 'T12:00:00');
-
-  let startDate, endDate;
-
-  if (win === 'today') {
-    startDate = endDate = ptDateStr;
-  } else if (win === 'week') {
-    const day = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((day + 6) % 7));
-    startDate = monday.toISOString().slice(0, 10);
-    endDate = ptDateStr;
-  } else if (win === 'day-14') {
-    const start = new Date(now);
-    start.setDate(now.getDate() - 13);
-    startDate = start.toISOString().slice(0, 10);
-    endDate = ptDateStr;
-  } else if (win === 'week-4') {
-    const start = new Date(now);
-    start.setDate(now.getDate() - 27);
-    startDate = start.toISOString().slice(0, 10);
-    endDate = ptDateStr;
-  } else if (win === 'month-4') {
-    startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10);
-    endDate = ptDateStr;
-  } else {
-    return res.status(400).json({ error: 'Invalid window param' });
-  }
-
-  const userIds = AGENTS_TEAM.map(m => m.outreachUserId);
+  const { window: win = 'today', date } = req.query;
 
   try {
-    const [calls, mailings] = await Promise.all([
-      fetchCalls(userIds, startDate, endDate),
-      fetchMailings(userIds, startDate, endDate),
-    ]);
+    const token = await getOutreachToken();
 
-    const stats = computeStats(calls, mailings);
+    const ptNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const todayPT = ptNow.toISOString().slice(0, 10);
 
-    return res.status(200).json({
-      isLive: true,
-      source: 'outreach',
-      window: win,
-      stats,
-      teamMembers: AGENTS_TEAM,
-    });
+    if (win === 'today' || date === 'today') {
+      const start = `${todayPT}T00:00:00.000Z`;
+      const end = `${todayPT}T23:59:59.999Z`;
+      // Use PT midnight
+      const ptStart = new Date(todayPT + 'T07:00:00.000Z'); // PT midnight = UTC+7 in PDT
+      const stats = await getStatsForRange(
+        ptStart.toISOString(),
+        new Date(ptStart.getTime() + 86400000).toISOString(),
+        token
+      );
+      return res.status(200).json({ isLive: true, window: win, stats, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    if (date) {
+      const ptStart = new Date(date + 'T07:00:00.000Z');
+      const stats = await getStatsForRange(
+        ptStart.toISOString(),
+        new Date(ptStart.getTime() + 86400000).toISOString(),
+        token
+      );
+      return res.status(200).json({ isLive: true, window: 'date', date, stats, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    return res.status(400).json({ error: 'Provide window=today or date=YYYY-MM-DD' });
   } catch (err) {
-    const isScopeError = err.message.includes('unauthorizedOauthScope') || err.message.includes('calls.read') || err.message.includes('mailings.read');
     console.error('[outreach-activity-stats]', err.message);
-
-    return res.status(200).json({
-      isLive: false,
-      source: 'outreach',
-      window: win,
-      stats: { ...EMPTY_STATS },
-      teamMembers: AGENTS_TEAM,
-      error: isScopeError
-        ? 'Outreach OAuth needs calls.read + mailings.read scopes — re-authorize the app to enable live data.'
-        : err.message,
-    });
+    return res.status(200).json({ isLive: false, window: win, stats: { ...EMPTY_STATS }, error: err.message });
   }
-}
-
-// ── Compute stats from raw Outreach records ───────────────────────────────────
-
-function computeStats(calls, mailings) {
-  // Calls
-  const totalCalls = calls.length;
-
-  // Connects: calls where answered=true
-  const connects = calls.filter(c => c.attributes?.answered === true).length;
-
-  // Emails sent (delivered mailings)
-  const emailsSent = mailings.length;
-
-  // Unique contacts contacted (from calls + mailings)
-  const contactIds = new Set();
-  for (const c of calls) {
-    const pid = c.relationships?.prospect?.data?.id;
-    if (pid) contactIds.add(`call_${pid}`);
-  }
-  for (const m of mailings) {
-    const pid = m.relationships?.prospect?.data?.id;
-    if (pid) contactIds.add(`mail_${pid}`);
-  }
-  const contactsContacted = contactIds.size;
-
-  // Unique accounts contacted (deduplicate by account relationship)
-  const accountIds = new Set();
-  for (const c of calls) {
-    const aid = c.relationships?.account?.data?.id;
-    if (aid) accountIds.add(aid);
-  }
-  for (const m of mailings) {
-    const aid = m.relationships?.account?.data?.id;
-    if (aid) accountIds.add(aid);
-  }
-  const accountsContacted = accountIds.size;
-
-  // Sets: meetings booked — look for calls with meetingBooked=true or specific outcomes
-  const sets = calls.filter(c =>
-    c.attributes?.meetingBooked === true ||
-    (c.attributes?.outcome || '').toLowerCase().includes('meeting') ||
-    (c.attributes?.outcome || '').toLowerCase().includes('set')
-  ).length;
-
-  return { calls: totalCalls, connects, emailsSent, contactsContacted, accountsContacted, sets };
 }

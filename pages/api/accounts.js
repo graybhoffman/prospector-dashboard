@@ -114,8 +114,8 @@ export default async function handler(req, res) {
     conditions.push("(db_status IS NULL OR db_status != 'excluded')");
   }
 
-  // Legacy exclude_from_reporting filter (only applies outside db_status mode)
-  if (queue !== 'enrichment' && exclude_from_reporting === 'true' && includeExcluded !== 'true') {
+  // Legacy exclude_from_reporting filter
+  if (exclude_from_reporting === 'true' && includeExcluded !== 'true') {
     conditions.push('exclude_from_reporting = TRUE');
   }
 
@@ -221,9 +221,22 @@ export default async function handler(req, res) {
   `;
 
   try {
+    // Deduplicate by name: prefer rows with sfdc_id, then highest id
+    const dedupeSubquery = `
+      WITH ranked AS (
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY name
+          ORDER BY
+            CASE WHEN sfdc_id IS NOT NULL THEN 0 ELSE 1 END,
+            id DESC
+        ) AS rn
+        FROM accounts
+      )
+      SELECT * FROM ranked WHERE rn = 1
+    `;
     const [countResult, dataResult] = await Promise.all([
-      query(`${dedupCTE} SELECT COUNT(*) FROM ranked WHERE _dedup_rn = 1`, params),
-      query(`${dedupCTE} SELECT * FROM ranked WHERE _dedup_rn = 1 ${orderBy} LIMIT ${ps} OFFSET ${offset}`, params),
+      query(`SELECT COUNT(*) FROM (${dedupeSubquery}) deduped ${where}`, params),
+      query(`SELECT * FROM (${dedupeSubquery}) deduped ${where} ${orderBy} LIMIT ${ps} OFFSET ${offset}`, params),
     ]);
 
     // Strip the internal dedup column from results
