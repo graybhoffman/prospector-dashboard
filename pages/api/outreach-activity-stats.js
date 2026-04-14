@@ -13,9 +13,7 @@
  * Response: { stats: { calls, connects, emailsSent, contactsContacted, accountsContacted, sets }, isLive, window }
  */
 
-import { query } from '../../lib/db';
-import fs from 'fs';
-import path from 'path';
+import { getAccessToken } from '../../lib/outreach';
 
 // ─── AGENTS TEAM CONFIG ────────────────────────────────────────────────────
 // To add a team member: add their Outreach user ID to this array
@@ -25,10 +23,6 @@ const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044];
 // ──────────────────────────────────────────────────────────────────────────
 
 const OUTREACH_BASE = 'https://api.outreach.io/api/v2';
-const TOKEN_PATH = path.join(process.cwd(), 'outreach_tokens.json');
-
-// Also check workspace path
-const WORKSPACE_TOKEN_PATH = '/home/openclaw/.openclaw/workspace/memory/outreach_tokens.json';
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -37,38 +31,6 @@ function cors(res) {
 }
 
 const EMPTY_STATS = { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
-
-async function getOutreachToken() {
-  let tokens = null;
-  for (const p of [TOKEN_PATH, WORKSPACE_TOKEN_PATH]) {
-    try {
-      if (fs.existsSync(p)) {
-        tokens = JSON.parse(fs.readFileSync(p, 'utf8'));
-        break;
-      }
-    } catch {}
-  }
-  if (!tokens) throw new Error('No Outreach tokens found');
-
-  // Try refresh
-  const r = await fetch('https://api.outreach.io/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: 'UIRYF~S0gyzA7OtwGwwM~pI.z4hVVuUv5rdJzOAlbNC_',
-      client_secret: 'a[h-PshiV9Jrn!3F@IllVdSok:<S2rX:4>_T(*J4SkE',
-      redirect_uri: 'https://www.localhost:8888/oauth/redirect',
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refresh_token,
-    }),
-  });
-  const data = await r.json();
-  if (data.access_token) {
-    tokens.access_token = data.access_token;
-    try { fs.writeFileSync(WORKSPACE_TOKEN_PATH, JSON.stringify(tokens)); } catch {}
-  }
-  return tokens.access_token;
-}
 
 async function fetchOutreachPage(endpoint, token) {
   const res = await fetch(`${OUTREACH_BASE}${endpoint}`, {
@@ -134,7 +96,7 @@ export default async function handler(req, res) {
   const { window: win = 'today', date } = req.query;
 
   try {
-    const token = await getOutreachToken();
+    const token = await getAccessToken();
 
     const ptNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
     const todayPT = ptNow.toISOString().slice(0, 10);
