@@ -1,8 +1,11 @@
 /**
  * /api/smart-search — POST
  *
- * AI natural language search over the Prospector DB.
- * Accepts { query: string, scope: "pipeline" | "icp" | "all" }
+ * AI natural language search over the Prospector DB and SFDC Closed-Won opps.
+ * Accepts { query: string, scope: "pipeline" | "icp" | "all" | "references" }
+ *
+ * scope=references  → Queries SFDC directly for Closed-Won opps (real customer references).
+ *                     Useful for finding credible names to drop in sales conversations.
  *
  * Parses the NL query to extract:
  *   - Geography: state names/codes, city names
@@ -17,6 +20,79 @@
  */
 
 import { query } from '../../lib/db';
+import https from 'https';
+
+// ── SFDC helper (for references scope) ──────────────────────────────────────
+let _sfdcSession = null;
+async function getSfdcSession() {
+  if (_sfdcSession && _sfdcSession.expiresAt > Date.now() + 60000) return _sfdcSession;
+  const soap = `<?xml version="1.0" encoding="utf-8"?>
+    <env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+      <env:Body><n1:login xmlns:n1="urn:partner.soap.sforce.com">
+        <n1:username>gray.hoffman@getathelas.com</n1:username>
+        <n1:password>ctk0WZK*rzw@tyh!pnpzK9vAeYocFwweG6zBmKDvO2F</n1:password>
+      </n1:login></env:Body></env:Envelope>`;
+  const r = await fetch('https://athelas.my.salesforce.com/services/Soap/u/59.0', {
+    method: 'POST', headers: { 'Content-Type': 'text/xml', 'SOAPAction': 'login' }, body: soap,
+  });
+  const text = await r.text();
+  const sid = text.match(/<sessionId>(.*?)<\/sessionId>/)?.[1];
+  const srv = text.match(/<serverUrl>(.*?)<\/serverUrl>/)?.[1];
+  if (!sid || !srv) throw new Error('SFDC login failed');
+  const base = srv.split('/services/')[0];
+  _sfdcSession = { sid, base, expiresAt: Date.now() + 90 * 60 * 1000 };
+  return _sfdcSession;
+}
+
+async function searchSfdcReferences(filters, limit) {
+  const safeLimit = Math.min(limit || 50, 100);
+  const { sid, base } = await getSfdcSession();
+  const conditions = ["StageName = 'Closed Won'", "Amount > 0", "Account.Name NOT LIKE '%TERMINATED%'"];
+  if (filters.state) {
+    const stateName = STATE_NAMES[filters.state] || '';
+    const stateFilter = stateName
+      ? "(Account.BillingState = '" + filters.state + "' OR Account.BillingState = '" + stateName.replace(/'/g, "\'") + "')"
+      : "Account.BillingState = '" + filters.state + "'";
+    conditions.push(stateFilter);
+  }
+  if (filters.city) {
+    conditions.push("Account.BillingCity LIKE '%" + filters.city.replace(/'/g, "\'") + "%'");
+  }
+  const soql = "SELECT Id, Name, Amount, CloseDate, Account.Id, Account.Name, Account.BillingCity, Account.BillingState, Account.EHR_System__c FROM Opportunity WHERE " + conditions.join(' AND ') + " ORDER BY Amount DESC, CloseDate DESC LIMIT " + safeLimit;
+  const url = base + '/services/data/v59.0/query?q=' + encodeURIComponent(soql);
+  const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + sid } });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error((data && data[0] && data[0].message) || 'SFDC query failed');
+  return (data.records || []).map(function(r) {
+    return {
+      id: r.Id,
+      name: r.Name,
+      accountId: r.Account && r.Account.Id,
+      accountName: r.Account && r.Account.Name,
+      city: r.Account && r.Account.BillingCity,
+      state: r.Account && r.Account.BillingState,
+      ehr: r.Account && r.Account.EHR_System__c,
+      amount: r.Amount,
+      closeDate: r.CloseDate,
+      sfdcLink: 'https://athelas.lightning.force.com/lightning/r/Opportunity/' + r.Id + '/view',
+      accountSfdcLink: (r.Account && r.Account.Id) ? 'https://athelas.lightning.force.com/lightning/r/Account/' + r.Account.Id + '/view' : null,
+    };
+  });
+}
+
+// State name lookup for SFDC geo filtering
+const STATE_NAMES = {
+  AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',
+  DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',
+  KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',
+  MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',
+  NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',
+  OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',
+  TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',
+  WI:'Wisconsin',WY:'Wyoming',DC:'District of Columbia',
+};
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -325,6 +401,23 @@ export default async function handler(req, res) {
 
   try {
     const filters = parseQuery(rawQuery);
+
+    // ── References scope: search SFDC Closed-Won opps directly ───────────────
+    if (scope === 'references') {
+      const results = await searchSfdcReferences(filters, Math.min(100, parseInt(limit, 10) || 50));
+      const filtersApplied = {};
+      if (filters.state) filtersApplied.state = filters.state;
+      if (filters.city) filtersApplied.city = filters.city;
+      if (filters.ehr) filtersApplied.ehr = filters.ehr;
+      if (filters.specialty) filtersApplied.specialty = filters.specialty;
+      return res.status(200).json({
+        references: results,
+        total: results.length,
+        filtersApplied,
+        scope,
+        query: rawQuery,
+      });
+    }
     const safeLimit = Math.min(200, parseInt(limit, 10) || 100);
 
     // Build params with proper indexing

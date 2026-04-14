@@ -6044,6 +6044,154 @@ function SmartSearchSection({ scope, placeholder, columns, onRowClick }) {
   );
 }
 
+
+// ─── References Search Section (Closed-Won SFDC opps) ────────────────────────
+function ReferencesSearchSection() {
+  const [inputVal, setInputVal] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState(null);
+  const [filtersApplied, setFiltersApplied] = useState(null);
+
+  async function handleSearch(e) {
+    e?.preventDefault();
+    const q = inputVal.trim();
+    if (!q) return;
+    setLoading(true); setError(null); setResults(null);
+    try {
+      const resp = await fetch('/api/smart-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, scope: 'references' }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Search failed');
+      setResults(data.references || []);
+      setFiltersApplied(data.filtersApplied || {});
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  }
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '—';
+  const fmtAmt  = (n) => n ? '$' + Number(n).toLocaleString() : '—';
+
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 4, height: 22, background: C.green, borderRadius: 2, flexShrink: 0 }} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.textPri }}>✅ Closed-Won References</div>
+          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
+            Search across ALL Commure closed-won accounts — find credible names to reference in calls and proposals
+          </div>
+        </div>
+      </div>
+
+      <form onSubmit={handleSearch} style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        <input
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          placeholder="e.g. podiatry in Texas, or orthopedics on eCW in California, or practices in NY"
+          style={{
+            flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: '9px 13px', color: C.textPri, fontSize: 13, outline: 'none',
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch(e)}
+        />
+        <button type="submit" disabled={loading || !inputVal.trim()} style={{
+          background: loading ? C.border : C.green, color: '#fff', border: 'none', borderRadius: 8,
+          padding: '0 18px', fontWeight: 600, fontSize: 13, cursor: loading ? 'default' : 'pointer',
+          opacity: loading || !inputVal.trim() ? 0.5 : 1,
+        }}>
+          {loading ? '…' : 'Search'}
+        </button>
+      </form>
+
+      {/* Filter chips */}
+      {filtersApplied && Object.keys(filtersApplied).length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 11, color: C.textMuted, alignSelf: 'center' }}>Filters:</span>
+          {Object.entries(filtersApplied).map(([k, v]) => (
+            <span key={k} style={{
+              background: C.green + '22', color: C.green, fontSize: 11, fontWeight: 600,
+              padding: '2px 8px', borderRadius: 4, border: `1px solid ${C.green}44`,
+            }}>{k}={v}</span>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>⚠ {error}</div>
+      )}
+
+      {results && results.length === 0 && (
+        <div style={{ color: C.textMuted, fontSize: 13, padding: '16px 0', textAlign: 'center' }}>
+          No closed-won accounts found matching that search. Try a broader query.
+        </div>
+      )}
+
+      {results && results.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>
+            {results.length} closed-won {results.length === 1 ? 'account' : 'accounts'} found
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                  {['Account', 'Opp Name', 'EHR', 'Deal Size', 'Closed', 'Location', ''].map((h) => (
+                    <th key={h} style={{
+                      padding: '6px 10px', textAlign: 'left', fontWeight: 600,
+                      color: C.textSec, fontSize: 11, whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={r.id || i} style={{
+                    borderBottom: `1px solid ${C.border}22`,
+                    background: i % 2 === 0 ? 'transparent' : C.surface,
+                  }}>
+                    <td style={{ padding: '7px 10px', fontWeight: 700, color: C.textPri }}>
+                      {r.accountSfdcLink
+                        ? <a href={r.accountSfdcLink} target="_blank" rel="noreferrer" style={{ color: C.textPri, textDecoration: 'none' }}>{r.accountName || r.name}</a>
+                        : (r.accountName || r.name)}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: C.textSec, maxWidth: 220 }}>
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.name}
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 10px', color: C.textSec }}>
+                      {r.ehr || '—'}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: C.green, fontWeight: 600 }}>
+                      {fmtAmt(r.amount)}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: C.textMuted, whiteSpace: 'nowrap' }}>
+                      {fmtDate(r.closeDate)}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: C.textMuted, whiteSpace: 'nowrap' }}>
+                      {[r.city, r.state].filter(Boolean).join(', ') || '—'}
+                    </td>
+                    <td style={{ padding: '7px 10px' }}>
+                      <a href={r.sfdcLink} target="_blank" rel="noreferrer"
+                        style={{ color: C.blue, fontSize: 11, fontWeight: 600, textDecoration: 'none' }}>
+                        SFDC ↗
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ReferencesTab() {
   const [viewingAccountId, setViewingAccountId] = useState(null);
 
@@ -6114,6 +6262,11 @@ function ReferencesTab() {
       />
 
       {/* Divider */}
+      <div style={{ borderTop: `1px solid ${C.border}`, margin: '8px 0 32px' }} />
+
+      {/* Section C: Closed-Won References */}
+      <ReferencesSearchSection />
+
       <div style={{ borderTop: `1px solid ${C.border}`, margin: '8px 0 32px' }} />
 
       {/* Section B: ICP Universe Search */}
