@@ -2,7 +2,7 @@
  * /api/icp-ownership — GET
  *
  * Returns account ownership distribution for the ICP accounts ownership bar chart.
- * Groups by agents_owner, top 8 + "Other" bucket.
+ * Groups by SFDC account owner (sfdc_owner_name), top 8 + "Other" bucket.
  *
  * Response: { owners: [{name, count}], total }
  */
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   try {
     const result = await query(`
       SELECT
-        COALESCE(NULLIF(TRIM(agents_owner), ''), 'Unassigned') AS owner_name,
+        COALESCE(NULLIF(TRIM(sfdc_owner_name), ''), 'Unassigned') AS owner_name,
         COUNT(*) AS count
       FROM accounts
       WHERE db_status = 'main'
