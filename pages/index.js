@@ -85,6 +85,7 @@ const fetcher = (url) => fetch(url).then((r) => r.json());
 function fmt(n, style = 'decimal') {
   if (n == null || isNaN(n)) return '—';
   if (style === 'currency') {
+    if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
     if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
     return `$${n.toLocaleString()}`;
@@ -2364,7 +2365,8 @@ function DataSection() {
       const totalColSpan = 13; // number of columns in the accounts table
 
       // Build SFDC link if sfdc_id exists
-      const sfdcUrl = acc?.sfdc_id
+      const sfdcUrl = acc?.sfdc_link || (acc?.sfdc_id ? `https://athelas.lightning.force.com/lightning/r/Account/${acc.sfdc_id}/view` : null)
+      const _legacy =  acc?.sfdc_id
         ? `https://athelas.lightning.force.com/lightning/r/Account/${acc.sfdc_id}/view`
         : null;
 
@@ -2987,13 +2989,13 @@ function ManageTab() {
     );
   }
 
-  function InlineEditCell({ value, field, accountId }) {
+  function InlineEditCell({ value, field, accountId, display }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(String(value ?? ''));
     if (!editing) return (
       <span onClick={() => { setDraft(String(value ?? '')); setEditing(true); }}
         title="Click to edit" style={{ cursor: 'text', minWidth: 30, display: 'inline-block', color: value ? '#cbd5e1' : '#475569' }}>
-        {value != null && value !== '' ? String(value) : '—'}
+        {display != null ? display : (value != null && value !== '' ? String(value) : '—')}
       </span>
     );
     return (
@@ -3079,8 +3081,8 @@ function ManageTab() {
                             onChange={() => setSelected(prev => { const s = new Set(prev); s.has(aid) ? s.delete(aid) : s.add(aid); return s; })} />
                         </td>
                         <td style={{ ...S.td(i), maxWidth: 200 }}>
-                          {a.sfdc_link
-                            ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500, ...(a.exclude_from_reporting ? { opacity: 0.5, textDecoration: 'line-through' } : {}) }}>{a.name}</a>
+                          {(a.sfdc_link || a.sfdc_id)
+                            ? <a href={a.sfdc_link || `https://athelas.lightning.force.com/lightning/r/Account/${a.sfdc_id}/view`} target="_blank" rel="noreferrer" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500, ...(a.exclude_from_reporting ? { opacity: 0.5, textDecoration: 'line-through' } : {}) }}>{a.name}</a>
                             : <span style={{ color: '#cbd5e1', fontWeight: 500, ...(a.exclude_from_reporting ? { opacity: 0.5, textDecoration: 'line-through' } : {}) }}>{a.name}</span>}
                           {a.exclude_from_reporting && <span style={{ background: '#374151', color: '#9ca3af', fontSize: 10, padding: '1px 5px', borderRadius: 3, marginLeft: 5 }}>excl</span>}
                         </td>
@@ -3096,7 +3098,7 @@ function ManageTab() {
                             : <span style={S.muted}>—</span>}
                         </td>
                         <td style={S.td(i)}>
-                          <InlineEditCell value={a.annual_revenue != null ? a.annual_revenue : ''} field="annual_revenue" accountId={aid} />
+                          <InlineEditCell value={a.annual_revenue != null ? a.annual_revenue : ''} field="annual_revenue" accountId={aid} display={a.annual_revenue != null ? fmt(a.annual_revenue, 'currency') : null} />
                         </td>
                         <td style={S.td(i)}>
                           <InlineEditCell value={a.num_providers != null ? a.num_providers : ''} field="num_providers" accountId={aid} />
@@ -3123,7 +3125,7 @@ function ManageTab() {
                             : <span style={S.muted}>—</span>}
                         </td>
                         <td style={S.td(i)}>
-                          {a.sfdc_link ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', fontSize: 11 }}>↗</a> : <span style={S.muted}>—</span>}
+                          {(a.sfdc_link || a.sfdc_id) ? <a href={a.sfdc_link || \`https://athelas.lightning.force.com/lightning/r/Account/\${a.sfdc_id}/view\`} target="_blank" rel="noreferrer" style={{ color: '#3b82f6', fontSize: 11 }}>↗ SFDC</a> : <span style={S.muted}>—</span>}
                         </td>
                       </tr>
                     );
