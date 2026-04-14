@@ -5795,38 +5795,72 @@ function SyncLogDataTab() {
 }
 
 // ─── References Tab ──────────────────────────────────────────────────────────
-function ReferencesTab() {
-  const [query, setQuery] = useState('');
+// Toast helper
+function showToast(msg) {
+  const toast = document.createElement('div');
+  toast.textContent = msg;
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+    background: '#6366f1', color: '#fff', padding: '10px 22px', borderRadius: '10px',
+    fontSize: '14px', fontWeight: '600', zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+    transition: 'opacity 0.3s',
+  });
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500);
+}
+
+function FiltersApplied({ filtersApplied, total }) {
+  const parts = Object.entries(filtersApplied || {}).map(([k, v]) => `${k}=${v}`);
+  if (!parts.length && !total) return null;
+  return (
+    <div style={{
+      fontSize: 12, color: C.textSec, marginBottom: 12,
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 8, padding: '8px 14px', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center',
+    }}>
+      <span style={{ color: C.textMuted, marginRight: 4 }}>Filtered by:</span>
+      {parts.map((p) => (
+        <span key={p} style={{
+          background: C.accent + '22', color: C.accent, borderRadius: 5,
+          padding: '2px 8px', fontSize: 11, fontWeight: 600,
+        }}>{p}</span>
+      ))}
+      {total != null && (
+        <span style={{ color: C.textMuted, marginLeft: 'auto' }}>{total} result{total !== 1 ? 's' : ''}</span>
+      )}
+    </div>
+  );
+}
+
+function SmartSearchSection({ scope, placeholder, columns, onRowClick }) {
+  const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [results, setResults] = useState(null);
-  const [resolvedState, setResolvedState] = useState(null);
+  const [filtersApplied, setFiltersApplied] = useState(null);
+  const [total, setTotal] = useState(null);
   const inputRef = useRef(null);
 
   async function handleSearch(e) {
     e?.preventDefault();
-    const raw = query.trim();
-    if (!raw) return;
+    const q = inputVal.trim();
+    if (!q) return;
     setLoading(true);
     setError(null);
     setResults(null);
+    setFiltersApplied(null);
 
     try {
-      // Parse "city, state" or "state" from the input
-      let state = raw;
-      let city = '';
-      const commaIdx = raw.indexOf(',');
-      if (commaIdx !== -1) {
-        city  = raw.slice(0, commaIdx).trim();
-        state = raw.slice(commaIdx + 1).trim();
-      }
-      const params = new URLSearchParams({ state });
-      if (city) params.set('city', city);
-      const resp = await fetch(`/api/local-references?${params}`);
+      const resp = await fetch('/api/smart-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, scope }),
+      });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'Request failed');
-      setResults(data.results || []);
-      setResolvedState(data.stateCode || state);
+      if (!resp.ok) throw new Error(data.error || 'Search failed');
+      setResults(data.accounts || []);
+      setFiltersApplied(data.filtersApplied || {});
+      setTotal(data.total ?? (data.accounts?.length || 0));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5834,63 +5868,72 @@ function ReferencesTab() {
     }
   }
 
-  function fmtAmount(n) {
-    if (!n) return '—';
-    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000)     return `$${Math.round(n / 1_000)}K`;
-    return `$${n.toLocaleString()}`;
-  }
-
-  function fmtDate(d) {
-    if (!d) return '—';
-    return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-  }
+  const accentColor = scope === 'pipeline' ? C.blue : C.teal;
 
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto', padding: '12px 0' }}>
-      {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px' }}>
-          📍 Local References
-        </h2>
-        <p style={{ margin: '6px 0 0', color: C.textSec, fontSize: 13, lineHeight: 1.5 }}>
-          Find nearby Commure <strong style={{ color: C.green }}>Closed Won</strong> accounts to name-drop when calling prospects in a given region.
-        </p>
+    <div style={{ marginBottom: 32 }}>
+      {/* Section header */}
+      <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 4, height: 22, background: accentColor, borderRadius: 2, flexShrink: 0,
+        }} />
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.textPri }}>
+            {scope === 'pipeline' ? '🚀 Pipeline Search' : '🌐 ICP Universe Search'}
+          </div>
+          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>
+            {scope === 'pipeline'
+              ? 'Active pipeline accounts (Outreach, Discovery, SQL, Negotiations, etc.)'
+              : 'Full ICP universe — all main DB accounts'}
+          </div>
+        </div>
       </div>
 
       {/* Search form */}
-      <form onSubmit={handleSearch} style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
+      <form onSubmit={handleSearch} style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
         <input
           ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder='City or State — e.g. "Baton Rouge, LA" · "Ohio" · "upstate NY"'
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          placeholder={placeholder}
           style={{
             flex: 1, background: C.card, border: `1px solid ${C.border}`,
             borderRadius: 8, padding: '10px 14px', color: C.textPri,
-            fontSize: 14, outline: 'none',
+            fontSize: 13, outline: 'none',
           }}
+          onFocus={(e) => { e.target.style.borderColor = accentColor + '88'; }}
+          onBlur={(e) => { e.target.style.borderColor = C.border; }}
         />
         <button
           type="submit"
-          disabled={loading || !query.trim()}
+          disabled={loading || !inputVal.trim()}
           style={{
-            background: loading ? C.border : C.accent,
+            background: loading ? C.border : accentColor,
             color: '#fff', border: 'none', borderRadius: 8,
             padding: '10px 22px', cursor: loading ? 'default' : 'pointer',
             fontWeight: 600, fontSize: 13, transition: 'background 0.15s',
-            whiteSpace: 'nowrap',
+            whiteSpace: 'nowrap', opacity: !inputVal.trim() ? 0.5 : 1,
           }}
         >
-          {loading ? '🔍 Searching…' : '🔍 Find References'}
+          {loading ? '🔍 Searching…' : '🔍 Search'}
         </button>
       </form>
+
+      {/* Filters applied */}
+      {filtersApplied && Object.keys(filtersApplied).length > 0 && (
+        <FiltersApplied filtersApplied={filtersApplied} total={total} />
+      )}
+      {filtersApplied && Object.keys(filtersApplied).length === 0 && results !== null && (
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 10 }}>
+          No specific filters detected — showing broad results · {total} total
+        </div>
+      )}
 
       {/* Error */}
       {error && (
         <div style={{
           background: C.red + '18', border: `1px solid ${C.red}44`,
-          borderRadius: 10, padding: '12px 16px', color: C.red, fontSize: 13, marginBottom: 20,
+          borderRadius: 8, padding: '10px 14px', color: C.red, fontSize: 13, marginBottom: 12,
         }}>
           ⚠️ {error}
         </div>
@@ -5899,116 +5942,192 @@ function ReferencesTab() {
       {/* No results */}
       {results !== null && results.length === 0 && (
         <div style={{
-          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-          padding: '32px 24px', textAlign: 'center', color: C.textMuted, fontSize: 14,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+          padding: '24px', textAlign: 'center', color: C.textMuted, fontSize: 14,
         }}>
-          😶 No Closed Won accounts found in <strong style={{ color: C.textSec }}>{resolvedState}</strong>
-          {query.includes(',') ? ` near "${query.split(',')[0].trim()}"` : ''}.
-          <div style={{ fontSize: 12, marginTop: 6 }}>Try a broader state search.</div>
+          😶 No results found. Try different keywords.
         </div>
       )}
 
-      {/* Results */}
+      {/* Results table */}
       {results && results.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ color: C.textMuted, fontSize: 12, marginBottom: -4 }}>
-            {results.length} reference{results.length !== 1 ? 's' : ''} found in <strong style={{ color: C.accent }}>{resolvedState}</strong>
-            {query.includes(',') ? ` · near "${query.split(',')[0].trim()}"` : ''}
-          </div>
-
-          {results.map((ref, i) => (
-            <div key={i} style={{
-              background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
-              padding: '18px 20px', transition: 'border-color 0.15s',
-            }}>
-              {/* Account header */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <a
-                    href={ref.sfdc_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      color: C.textPri, fontWeight: 700, fontSize: 15,
-                      textDecoration: 'none', letterSpacing: '-0.2px',
-                    }}
-                  >
-                    {ref.accountName}
-                    <span style={{ color: C.accent, fontSize: 11, marginLeft: 6 }}>↗</span>
-                  </a>
-                  <div style={{ color: C.textMuted, fontSize: 12, marginTop: 3 }}>
-                    📍 {[ref.city, ref.state].filter(Boolean).join(', ') || '—'}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{
-                    color: C.green, fontWeight: 800, fontSize: 16,
-                  }}>
-                    {fmtAmount(ref.amount)}
-                  </div>
-                  <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2 }}>
-                    Closed {fmtDate(ref.closeDate)}
-                  </div>
-                </div>
-              </div>
-
-              {/* Contacts */}
-              {ref.contacts && ref.contacts.length > 0 ? (
-                <div style={{
-                  display: 'flex', gap: 10, flexWrap: 'wrap',
-                  borderTop: `1px solid ${C.borderSub}`, paddingTop: 12,
-                }}>
-                  {ref.contacts.map((c, j) => (
-                    <div key={j} style={{
-                      background: C.surface, border: `1px solid ${C.borderSub}`,
-                      borderRadius: 8, padding: '8px 12px', flex: '1 1 200px', minWidth: 180,
+        <div style={{ overflowX: 'auto', borderRadius: 10, border: `1px solid ${C.border}` }}>
+          <table style={{
+            width: '100%', borderCollapse: 'collapse', fontSize: 13,
+          }}>
+            <thead>
+              <tr style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+                {columns.map((col) => (
+                  <th key={col.key} style={{
+                    padding: '10px 14px', textAlign: 'left', fontWeight: 600,
+                    color: C.textMuted, fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                  }}>{col.label}</th>
+                ))}
+                <th style={{
+                  padding: '10px 14px', textAlign: 'left', fontWeight: 600,
+                  color: C.textMuted, fontSize: 11, letterSpacing: '0.05em', textTransform: 'uppercase',
+                }}>&nbsp;</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((row, i) => (
+                <tr
+                  key={row.id || i}
+                  onClick={() => onRowClick && onRowClick(row)}
+                  style={{
+                    background: i % 2 === 0 ? C.card : C.surface,
+                    borderBottom: `1px solid ${C.borderSub}`,
+                    cursor: onRowClick ? 'pointer' : 'default',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = C.cardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = i % 2 === 0 ? C.card : C.surface; }}
+                >
+                  {columns.map((col) => (
+                    <td key={col.key} style={{
+                      padding: '10px 14px', color: col.color || C.textPri,
+                      maxWidth: col.maxWidth || 220, overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
-                      <div style={{ color: C.textPri, fontWeight: 600, fontSize: 13 }}>{c.name}</div>
-                      <div style={{ color: C.purple, fontSize: 11, marginTop: 2 }}>{c.title || '—'}</div>
-                      {c.phone && (
-                        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 4 }}>
-                          📞 {c.phone}
-                        </div>
-                      )}
-                      {c.email && (
-                        <div style={{ color: C.textMuted, fontSize: 11, marginTop: 2, wordBreak: 'break-all' }}>
-                          ✉️ {c.email}
-                        </div>
-                      )}
-                    </div>
+                      {col.render ? col.render(row) : (row[col.key] || '—')}
+                    </td>
                   ))}
-                </div>
-              ) : (
-                <div style={{
-                  borderTop: `1px solid ${C.borderSub}`, paddingTop: 10,
-                  color: C.textMuted, fontSize: 12,
-                }}>
-                  No senior contacts on file
-                </div>
-              )}
-            </div>
-          ))}
+                  <td style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {row.sfdc_link && (
+                        <a
+                          href={row.sfdc_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            color: C.accent, fontSize: 11, fontWeight: 600,
+                            textDecoration: 'none', padding: '3px 8px',
+                            background: C.accent + '18', borderRadius: 5,
+                          }}
+                        >
+                          SFDC ↗
+                        </a>
+                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); showToast('Campaign trigger coming soon 🚀'); }}
+                        style={{
+                          background: accentColor + '22', color: accentColor,
+                          border: `1px solid ${accentColor}44`, borderRadius: 5,
+                          padding: '3px 8px', cursor: 'pointer', fontSize: 11,
+                          fontWeight: 600, whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ⚡ Campaign
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Usage tip */}
+      {/* Usage tip when idle */}
       {results === null && !loading && (
         <div style={{
-          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12,
-          padding: '20px 24px', color: C.textMuted, fontSize: 13,
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
+          padding: '16px 20px', color: C.textMuted, fontSize: 12, lineHeight: 1.7,
         }}>
-          <div style={{ fontWeight: 700, color: C.textSec, marginBottom: 8 }}>💡 How to use</div>
-          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
-            <li>Type a <strong>state</strong> like <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>Ohio</code> or <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>NY</code></li>
-            <li>Or a <strong>city + state</strong> like <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>Baton Rouge, LA</code></li>
-            <li>Works with fuzzy input: <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>upstate NY</code>, <code style={{ background: C.card, borderRadius: 4, padding: '1px 5px' }}>southern california</code></li>
-            <li>Returns up to 3 Closed Won accounts sorted by deal size</li>
-          </ul>
+          <strong style={{ color: C.textSec }}>💡 Try:</strong>{' '}
+          <em>{placeholder}</em>
         </div>
       )}
     </div>
   );
 }
+
+function ReferencesTab() {
+  const [viewingAccountId, setViewingAccountId] = useState(null);
+
+  const PIPELINE_COLS = [
+    { key: 'name', label: 'Account', maxWidth: 200, render: (r) => (
+      <span style={{ color: C.textPri, fontWeight: 600 }}>{r.name}</span>
+    )},
+    { key: 'agents_stage', label: 'Stage', render: (r) => {
+      const s = r.agents_stage || '—';
+      const color = STAGE_COLORS[s] || C.textMuted;
+      return <span style={{ color, fontWeight: 600, fontSize: 12 }}>{s}</span>;
+    }},
+    { key: 'ehr', label: 'EHR', color: C.textSec, render: (r) => r.ehr_system || r.ehr || '—' },
+    { key: 'agents_owner', label: 'Owner', color: C.textSec },
+    { key: 'location', label: 'City/State', color: C.textMuted, render: (r) => {
+      const parts = [r.billing_city, r.billing_state].filter(Boolean);
+      return parts.join(', ') || '—';
+    }},
+  ];
+
+  const ICP_COLS = [
+    { key: 'name', label: 'Account', maxWidth: 200, render: (r) => (
+      <span style={{ color: C.textPri, fontWeight: 600 }}>{r.name}</span>
+    )},
+    { key: 'ehr', label: 'EHR', color: C.textSec, render: (r) => r.ehr_system || r.ehr || '—' },
+    { key: 'num_employees', label: 'Employees', color: C.textSec, render: (r) => r.num_employees ? r.num_employees.toLocaleString() : '—' },
+    { key: 'location', label: 'City/State', color: C.textMuted, render: (r) => {
+      const parts = [r.billing_city, r.billing_state].filter(Boolean);
+      return parts.join(', ') || '—';
+    }},
+    { key: 'db_status', label: 'Status', color: C.textMuted, render: (r) => (
+      <span style={{
+        fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4,
+        background: r.db_status === 'main' ? C.green + '22' : C.border,
+        color: r.db_status === 'main' ? C.green : C.textMuted,
+      }}>{r.db_status || 'null'}</span>
+    )},
+  ];
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '12px 0' }}>
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px' }}>
+          🔍 Smart Search
+        </h2>
+        <p style={{ margin: '6px 0 0', color: C.textSec, fontSize: 13, lineHeight: 1.5 }}>
+          Natural language search across your pipeline and ICP universe. Try{' '}
+          <span style={{ color: C.accent }}>"podiatry practices in Texas on eCW"</span>{' '}
+          or <span style={{ color: C.teal }}>"athena cardiology in Florida with 50+ employees"</span>.
+        </p>
+      </div>
+
+      {/* AccountDetailPopup */}
+      {viewingAccountId && (
+        <AccountDetailPopup
+          id={viewingAccountId}
+          onClose={() => setViewingAccountId(null)}
+        />
+      )}
+
+      {/* Section A: Pipeline Search */}
+      <SmartSearchSection
+        scope="pipeline"
+        placeholder="e.g. podiatry practices in Texas on eCW, or accounts owned by Gray in Discovery"
+        columns={PIPELINE_COLS}
+        onRowClick={(row) => setViewingAccountId(row.id || row.sfdc_id)}
+      />
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${C.border}`, margin: '8px 0 32px' }} />
+
+      {/* Section B: ICP Universe Search */}
+      <SmartSearchSection
+        scope="icp"
+        placeholder="e.g. eCW practices in LA with 50+ employees, or athena cardiology in Florida"
+        columns={ICP_COLS}
+        onRowClick={(row) => setViewingAccountId(row.id || row.sfdc_id)}
+      />
+    </div>
+  );
+}
+
+
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
