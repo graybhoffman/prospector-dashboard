@@ -4554,10 +4554,10 @@ function ActivityTrendCharts() {
   return (
     <div>
       <TrendSubSection title="📅 Daily (Last 14 days)" storageKey="wt_trends_daily" defaultOpen={true}>
-        <TrendChartSet data={dailyData} callsTarget={40} connectsTarget={4} setsTarget={1} />
+        <TrendChartSet data={dailyData} callsTarget={75} connectsTarget={4} setsTarget={1} />
       </TrendSubSection>
       <TrendSubSection title="📆 Weekly (Last 8 weeks)" storageKey="wt_trends_weekly" defaultOpen={false}>
-        <TrendChartSet data={weeklyData} callsTarget={200} connectsTarget={20} setsTarget={5} />
+        <TrendChartSet data={weeklyData} callsTarget={375} connectsTarget={20} setsTarget={5} />
       </TrendSubSection>
       <TrendSubSection title="🗓️ Monthly (Last 6 months)" storageKey="wt_trends_monthly" defaultOpen={false}>
         <TrendChartSet data={monthlyData} callsTarget={880} connectsTarget={88} setsTarget={22} />
@@ -4646,7 +4646,7 @@ function AgentsTeamActivity() {
       {/* ── Today's Stats ── */}
       <DashSection title="📊 Today — Agents Team" accent={C.purple}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}             target={40}   loading={todayLoading} />
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={today.calls}             target={75}   loading={todayLoading} />
           <ActivityMetricCard emoji="🔗" label="Connects"            value={today.connects}          target={4}    loading={todayLoading} />
           <ActivityMetricCard emoji="✉️"  label="Emails Sent"         value={today.emailsSent}        target={null} loading={todayLoading} />
           <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={today.contactsContacted} target={null} loading={todayLoading} />
@@ -4670,7 +4670,7 @@ function AgentsTeamActivity() {
       {/* ── This Week's Stats ── */}
       <DashSection title={`📅 This Week — ${getWeekRange()}`} accent={C.teal}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}             target={200}  loading={weekLoading} />
+          <ActivityMetricCard emoji="📞" label="Outbound Calls"      value={week.calls}             target={375}  loading={weekLoading} />
           <ActivityMetricCard emoji="🔗" label="Connects"            value={week.connects}          target={20}   loading={weekLoading} />
           <ActivityMetricCard emoji="✉️"  label="Emails Sent"         value={week.emailsSent}        target={null} loading={weekLoading} />
           <ActivityMetricCard emoji="👤" label="Contacts Contacted"  value={week.contactsContacted} target={null} loading={weekLoading} />
