@@ -2,6 +2,9 @@
  * /api/accounts/[id] — GET + PATCH
  *
  * GET  — full account detail
+ *   Special: if id starts with 'opp_', resolves the linked account via the
+ *            opportunity's sfdc_account_id or account_name (pipeline hybrid rows).
+ *
  * PATCH — update any editable fields in DB, and write SFDC-mapped fields to Salesforce
  *
  * PATCH body (all optional):
@@ -95,6 +98,43 @@ export default async function handler(req, res) {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'id required' });
 
+  // ── Resolve opp_ prefix ───────────────────────────────────────────────────
+  // Pipeline hybrid view uses 'opp_<db_id>' for opportunity rows.
+  // Resolve to the linked account via the opp's sfdc_account_id or account_name.
+  if (String(id).startsWith('opp_')) {
+    try {
+      const oppDbId = String(id).replace('opp_', '');
+      const oppRes = await query(
+        `SELECT sfdc_account_id, account_name FROM opportunities WHERE id::text = $1 LIMIT 1`,
+        [oppDbId]
+      );
+      if (!oppRes.rows.length) {
+        return res.status(404).json({ error: 'Opportunity not found' });
+      }
+      const opp = oppRes.rows[0];
+      let accRes = null;
+      if (opp.sfdc_account_id) {
+        accRes = await query(
+          `SELECT * FROM accounts WHERE sfdc_id = $1 LIMIT 1`,
+          [opp.sfdc_account_id]
+        );
+      }
+      if (!accRes?.rows?.length && opp.account_name) {
+        accRes = await query(
+          `SELECT * FROM accounts WHERE name ILIKE $1 LIMIT 1`,
+          [opp.account_name]
+        );
+      }
+      if (accRes?.rows?.length) {
+        return res.status(200).json({ account: accRes.rows[0] });
+      }
+      return res.status(404).json({ error: 'Account for opportunity not found' });
+    } catch (err) {
+      console.error('[accounts/[id] opp resolve]', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // ── GET ───────────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
     try {
@@ -133,7 +173,6 @@ export default async function handler(req, res) {
 
       for (const [col, val] of Object.entries(body)) {
         if (!ALL_EDITABLE.has(col)) continue;
-        // Coerce numeric fields
         let coerced = val;
         if (col === 'num_employees' || col === 'est_monthly_call_volume') {
           coerced = val === '' || val === null ? null : Number(val);
@@ -199,7 +238,6 @@ export default async function handler(req, res) {
         } catch (sfdcErr) {
           sfdcError = sfdcErr.message;
           console.warn('[accounts/[id] PATCH] SFDC error (non-fatal):', sfdcErr.message);
-          // If session expired, clear cache so next call re-logins
           _sfdcSession = null;
         }
       }
