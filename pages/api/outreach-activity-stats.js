@@ -64,13 +64,16 @@ async function getStatsForRange(startISO, endISO, token) {
         }
         cursor = data.links?.next || null;
       }
-    } catch {}
+    } catch (e) { console.error(`[activity-stats] calls uid=${userId}:`, e.message); }
 
     // Emails
     try {
       let cursor = `${OUTREACH_BASE}/mailings?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&filter[state]=delivered&page[size]=200`;
       while (cursor) {
-        const data = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        const resp = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) { console.error(`[activity-stats] mailings uid=${userId} HTTP ${resp.status}`); break; }
+        const data = await resp.json();
+        if (data.errors) { console.error(`[activity-stats] mailings uid=${userId}:`, JSON.stringify(data.errors[0])); break; }
         for (const mail of (data.data || [])) {
           stats.emailsSent++;
           const prospectId = mail.relationships?.prospect?.data?.id;
@@ -78,7 +81,7 @@ async function getStatsForRange(startISO, endISO, token) {
         }
         cursor = data.links?.next || null;
       }
-    } catch {}
+    } catch (e) { console.error(`[activity-stats] mailings uid=${userId}:`, e.message); }
   }
 
   stats.contactsContacted = contactIds.size;
@@ -161,6 +164,19 @@ export default async function handler(req, res) {
         trend.push({ label: d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), ...s, contacts: s.contactsContacted, accounts: s.accountsContacted });
       }
       return res.status(200).json({ isLive: true, window: win, trend, teamUserIds: AGENTS_TEAM_USER_IDS });
+    }
+
+    // ── week: current week (Mon 00:00 PT → now) ──────────────────────────
+    if (win === 'week') {
+      const now = new Date();
+      const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon...
+      const daysFromMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const monday = new Date(now);
+      monday.setUTCDate(now.getUTCDate() - daysFromMon);
+      const weekStart = monday.toISOString().slice(0, 10) + 'T07:00:00.000Z';
+      const weekEnd   = now.toISOString();
+      const stats = await getStatsForRange(weekStart, weekEnd, token);
+      return res.status(200).json({ isLive: true, window: win, stats, teamUserIds: AGENTS_TEAM_USER_IDS });
     }
 
     return res.status(400).json({ error: 'Provide window=today|week|day-14|week-8|month-6 or date=YYYY-MM-DD' });
