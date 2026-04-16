@@ -73,6 +73,15 @@ export default async function handler(req, res) {
 
   console.log(`[outreach-webhook] Received: eventName=${eventName} type=${dataType} id=${payload?.data?.id}`);
 
+  // Track last webhook event timestamp for health monitoring
+  query(`
+    UPDATE outreach_tokens SET
+      last_webhook_event_at = NOW(),
+      last_webhook_type = $1,
+      webhook_events_today = COALESCE(webhook_events_today, 0) + 1
+    WHERE id = 1
+  `, [eventName]).catch(() => {});
+
   // Always return 200 so Outreach doesn't retry valid deliveries
   try {
     await processEvent(eventName, dataType, payload);
