@@ -535,7 +535,7 @@ export default function DataGrid({
                       <input
                         value={colFilters[col.key] || ''}
                         onChange={(e) => handleColFilter(col.key, e.target.value)}
-                        placeholder="filter…"
+                        placeholder={col.filterHint || 'filter…'}
                         style={{
                           background: C.card, border: `1px solid ${C.border}`, borderRadius: 4,
                           color: C.textPri, padding: '3px 6px', fontSize: 11, outline: 'none',

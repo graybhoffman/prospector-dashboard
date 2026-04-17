@@ -85,6 +85,7 @@ export default async function handler(req, res) {
     agents_icp, agents_stage, agents_owner, ehr,
     exclude_from_reporting, has_roe, has_stage,
     source_category,
+    num_providers, num_locations, annual_revenue, est_monthly_call_volume,
     sort: sortCol, dir: sortDir,
     page = '1', limit, pageSize = '50',
     includeExcluded,
@@ -182,6 +183,41 @@ export default async function handler(req, res) {
   if (source_category) {
     conditions.push(`source_category ILIKE ${addParam('%' + source_category + '%')}`);
   }
+
+  // ── Numeric range filters: accepts "25-500", "500+", "<25", ">100", or plain number ──
+  function addNumericRangeFilter(paramVal, dbCol) {
+    if (!paramVal) return;
+    const v = String(paramVal).trim();
+    // Range: "25-500" or "25 - 500"
+    const rangeMatch = v.match(/^([\d,]+)\s*-\s*([\d,]+)$/);
+    if (rangeMatch) {
+      const lo = parseInt(rangeMatch[1].replace(/,/g, ''), 10);
+      const hi = parseInt(rangeMatch[2].replace(/,/g, ''), 10);
+      conditions.push(`${dbCol} >= ${addParam(lo)} AND ${dbCol} <= ${addParam(hi)}`);
+      return;
+    }
+    // "500+" or ">500"
+    const plusMatch = v.match(/^([\d,]+)\s*\+$/) || v.match(/^>([\d,]+)$/);
+    if (plusMatch) {
+      conditions.push(`${dbCol} >= ${addParam(parseInt(plusMatch[1].replace(/,/g, ''), 10))}`);
+      return;
+    }
+    // "<25" or "<=25"
+    const ltMatch = v.match(/^<=?([\d,]+)$/);
+    if (ltMatch) {
+      conditions.push(`${dbCol} <= ${addParam(parseInt(ltMatch[1].replace(/,/g, ''), 10))}`);
+      return;
+    }
+    // Plain number — exact match
+    const num = parseInt(v.replace(/,/g, ''), 10);
+    if (!isNaN(num)) {
+      conditions.push(`${dbCol} = ${addParam(num)}`);
+    }
+  }
+  addNumericRangeFilter(num_providers,           'COALESCE(dhc_num_physicians, num_providers)');
+  addNumericRangeFilter(num_locations,            'COALESCE(dhc_num_locations, num_locations)');
+  addNumericRangeFilter(annual_revenue,           'annual_revenue');
+  addNumericRangeFilter(est_monthly_call_volume,  'est_monthly_call_volume');
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 

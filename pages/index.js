@@ -5024,7 +5024,7 @@ function AccountsDataTab() {
       render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.industry || '—'}</span>,
     },
     {
-      key: 'num_providers', label: '# Providers', width: 90, filterable: false,
+      key: 'num_providers', label: '# Providers', width: 90, filterHint: 'e.g. 25-500',
       render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.num_providers ?? '—'}</span>,
       getValue: (row) => row.num_providers,
     },
@@ -5081,7 +5081,7 @@ function AccountsDataTab() {
       getValue: (row) => row.specialty,
     },
     {
-      key: 'dhc_num_physicians', label: 'Providers', width: 80,
+      key: 'dhc_num_physicians', label: 'Providers', width: 80, filterHint: 'e.g. 25-500',
       render: (row) => {
         const n = row.dhc_num_physicians;
         if (!n) return <span style={{ color: C.textMuted }}>—</span>;
@@ -5091,7 +5091,7 @@ function AccountsDataTab() {
       getValue: (row) => row.dhc_num_physicians,
     },
     {
-      key: 'num_locations', label: 'Locs', width: 60,
+      key: 'num_locations', label: 'Locs', width: 60, filterHint: 'e.g. 5-20',
       render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.num_locations || row.dhc_num_locations || '—'}</span>,
       getValue: (row) => row.num_locations || row.dhc_num_locations,
     },
@@ -5116,12 +5116,13 @@ function AccountsDataTab() {
       getValue: (row) => row.source_category,
     },
     {
-      key: 'annual_revenue', label: 'Revenue', width: 100, filterable: false,
+      key: 'annual_revenue', label: 'Revenue', width: 100, filterHint: 'e.g. 1000000-5000000',
       render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.annual_revenue ? fmtCurrency(Number(row.annual_revenue)) : '—'}</span>,
       getValue: (row) => row.annual_revenue,
     },
     {
-      key: 'est_monthly_call_volume', label: 'Call Vol/Mo', width: 90, filterable: false,
+      key: 'est_monthly_call_volume', label: 'Call Vol/Mo', width: 90, filterHint: 'e.g. 500+',
+
       render: (row) => <span style={{ color: C.textSec, fontSize: 12 }}>{row.est_monthly_call_volume || '—'}</span>,
       getValue: (row) => row.est_monthly_call_volume,
     },
