@@ -49,17 +49,24 @@ async function getStatsForRange(startISO, endISO, token) {
   for (const userId of AGENTS_TEAM_USER_IDS) {
     // Calls
     try {
-      let cursor = `${OUTREACH_BASE}/calls?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&page[size]=200`;
+      let cursor = `${OUTREACH_BASE}/calls?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&page[size]=200&include=callDisposition`;
       while (cursor) {
         const data = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        // Build disposition name map from included resources
+        const dispMap = {};
+        for (const inc of (data.included || [])) {
+          if (inc.type === 'callDisposition') dispMap[inc.id] = (inc.attributes?.name || '').toLowerCase();
+        }
         for (const call of (data.data || [])) {
           stats.calls++;
           const attrs = call.attributes || {};
-          if (attrs.answeredAt) stats.connects++;
-          // Sets: look for disposition indicating meeting booked
-          const disp = (attrs.disposition || attrs.outcome || '').toLowerCase();
-          if (disp.includes('meeting') || disp.includes('demo') || disp.includes('set') || disp.includes('booked')) stats.sets++;
-          // Track contacts/accounts
+          const dispId = call.relationships?.callDisposition?.data?.id;
+          const dispName = dispMap[dispId] || '';
+          // Connects = any "Answered - *" disposition (talked to a human)
+          if (dispName.startsWith('answered')) stats.connects++;
+          // Sets = meeting set disposition
+          if (dispName.includes('meeting set') || dispName.includes('meeting booked') || dispName.includes('demo set')) stats.sets++;
+          // Track contacts
           const prospectId = call.relationships?.prospect?.data?.id;
           if (prospectId) contactIds.add(prospectId);
         }

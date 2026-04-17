@@ -4348,7 +4348,7 @@ function OutreachCallDetailTable() {
               <tr>
                 <th style={thS}>Time</th>
                 <th style={thS}>Rep</th>
-                <th style={thS}>Connected</th>
+                <th style={thS}>Disposition</th>
                 <th style={thS}>Duration</th>
                 <th style={thS}>Recording</th>
                 <th style={thS}>In Outreach</th>
@@ -4360,7 +4360,7 @@ function OutreachCallDetailTable() {
                   <td style={tdS}>{c.createdAt ? new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                   <td style={tdS}>{c.rep}</td>
                   <td style={{ ...tdS, color: c.connected ? C.green : C.textMuted }}>
-                    {c.connected ? '✅ Yes' : '—'}
+                    {c.disposition || (c.connected ? '✅ Answered' : '—')}
                   </td>
                   <td style={tdS}>{c.duration ? `${Math.round(c.duration)}s` : '—'}</td>
                   <td style={tdS}>

@@ -55,14 +55,21 @@ export default async function handler(req, res) {
     const calls = [];
 
     for (const userId of AGENTS_TEAM_USER_IDS) {
-      let cursor = `${OUTREACH_BASE}/calls?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&page[size]=200`;
+      let cursor = `${OUTREACH_BASE}/calls?filter[user][id]=${userId}&filter[createdAt]=${startISO}..${endISO}&page[size]=200&include=callDisposition`;
       while (cursor) {
         const resp = await fetch(cursor, { headers: { Authorization: `Bearer ${token}` } });
         if (!resp.ok) break;
         const data = await resp.json();
+        // Build disposition map from included
+        const dispositionMap = {};
+        for (const inc of (data.included || [])) {
+          if (inc.type === 'callDisposition') dispositionMap[inc.id] = inc.attributes?.name || '';
+        }
         for (const call of (data.data || [])) {
           const attrs = call.attributes || {};
-          const connected = !!attrs.answeredAt;
+          const dispId = call.relationships?.callDisposition?.data?.id;
+          const dispName = dispositionMap[dispId] || null;
+          const connected = dispName ? dispName.toLowerCase().startsWith('answered') : !!attrs.answeredAt;
           if (connectedOnly === 'true' && !connected) continue;
 
           const prospectId = call.relationships?.prospect?.data?.id;
@@ -77,6 +84,7 @@ export default async function handler(req, res) {
             createdAt: attrs.createdAt,
             duration: attrs.duration || null,
             connected,
+            disposition: dispositionMap[dispId] || null,
             answeredAt: attrs.answeredAt || null,
             disposition: attrs.disposition || null,
             outcome: attrs.outcome || null,
