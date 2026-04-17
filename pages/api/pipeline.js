@@ -73,6 +73,8 @@ function oppToRecord(row) {
       'Source Category': row.acct_source_category || null,
       'Est. Calls/Month': row.est_monthly_call_volume != null ? Number(row.est_monthly_call_volume) : null,
       'Booked By':    row.booked_by || null,
+      'Opp Name':      row.name || null,
+      'Account SFDC ID': row.account_sfdc_id || null,
       'SFDC Link':    row.sfdc_id
         ? `https://athelas.lightning.force.com/lightning/r/Opportunity/${row.sfdc_id}/view`
         : (row.sfdc_link || null),
@@ -319,16 +321,23 @@ export default async function handler(req, res) {
     }
     const accFilterNoStage = buildAccountFiltersNoStage();
 
-    // For bar charts: if onlyDiscovery, use JOIN query to reflect stage filter
+    // For bar charts: reflect active stage filter properly
+    // onlyDiscovery → JOIN opps→accounts; onlyProspect → accFilter (stage applied); else → accFilterNoStage
     const filtEhrPromise = onlyDiscovery
       ? query(`SELECT a.ehr_system AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, oppFilter.params)
-      : query(`SELECT ehr_system    AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
+      : onlyProspect
+        ? query(`SELECT ehr_system AS val, COUNT(*) FROM accounts ${accFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilter.params)
+        : query(`SELECT ehr_system    AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
     const filtSpecialtyPromise = onlyDiscovery
       ? query(`SELECT a.specialty AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} AND a.specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, oppFilter.params)
-      : query(`SELECT specialty     AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, accFilterNoStage.params);
+      : onlyProspect
+        ? query(`SELECT specialty AS val, COUNT(*) FROM accounts ${accFilter.where} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, accFilter.params)
+        : query(`SELECT specialty     AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, accFilterNoStage.params);
     const filtSourcePromise = onlyDiscovery
       ? query(`SELECT a.source_category AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, oppFilter.params)
-      : query(`SELECT source_category AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
+      : onlyProspect
+        ? query(`SELECT source_category AS val, COUNT(*) FROM accounts ${accFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilter.params)
+        : query(`SELECT source_category AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
 
     // Run all filtered aggregation queries in parallel
     // Note: FILT_STAGE_SQL uses accFilter.params for accounts side and oppFilter.params for opps side
@@ -350,11 +359,15 @@ export default async function handler(req, res) {
         `SELECT stage_normalized AS stage, COUNT(*)::int AS cnt FROM opportunities ${oppFilter.where} GROUP BY 1`,
         oppFilter.params
       ),
-      query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where}`, accFilterNoStage.params),
+      onlyDiscovery
+        ? query(`SELECT COUNT(*) FROM opportunities ${oppFilter.where}`, oppFilter.params)
+        : query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where}`, accFilterNoStage.params),
       filtEhrPromise,
       filtSpecialtyPromise,
       filtSourcePromise,
-      query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL AND specialty != ''`, accFilterNoStage.params),
+      onlyDiscovery
+        ? query(`SELECT COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} AND a.specialty IS NOT NULL AND a.specialty != ''`, oppFilter.params)
+        : query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL AND specialty != ''`, accFilterNoStage.params),
     ]);
 
     // Merge stage counts from both sides

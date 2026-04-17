@@ -63,7 +63,7 @@ const PIPELINE_STAGES = [
 // Default filter excludes Prospects
 const NON_PROSPECT_STAGES = PIPELINE_STAGES.filter((s) => s !== 'Prospect');
 // Default filter: show all stages (empty = no filter)
-const DEFAULT_PIPELINE_FILTERS = { stage: NON_PROSPECT_STAGES };
+const DEFAULT_PIPELINE_FILTERS = { stage: ['Discovery','SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment'] };
 
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
@@ -1244,7 +1244,7 @@ function PipelineListTable({ records, meta, page, setPage }) {
   if (!records || records.length === 0) {
     return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
   }
-  const cols = ['Account Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV'];
+  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV'];
   const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   return (
@@ -1256,23 +1256,37 @@ function PipelineListTable({ records, meta, page, setPage }) {
           </tr>
         </thead>
         <tbody>
-          {records.map(r => (
-            <tr
-              key={r.id}
-              onClick={() => setViewingAccountId(r.id)}
-              style={{ cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = C.bg}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <td style={{ ...tdStyle, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', color: C.textPri, fontSize: 11 }}>{r.fields['Account Name'] || '—'}</td>
-              <td style={tdStyle}>{r.fields['Owner'] || r.fields['sfdc_owner_name'] || '—'}</td>
-              <td style={tdStyle}>{r.fields['Booked By'] || '—'}</td>
-              <td style={tdStyle}>{r.fields['Stage'] || '—'}</td>
-              <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
-              <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
-              <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
-            </tr>
-          ))}
+          {records.map(r => {
+            const acctSfdc = r.fields['Account SFDC ID'] || r.fields['sfdc_id'];
+            const acctLink = acctSfdc ? `https://athelas.lightning.force.com/lightning/r/Account/${acctSfdc}/view` : null;
+            const oppLink  = r.fields['SFDC Link'] || null;
+            return (
+              <tr
+                key={r.id}
+                onClick={() => setViewingAccountId(r.id)}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = C.bg}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <td style={{ ...tdStyle, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', color: C.textPri, fontSize: 11 }}>
+                  {acctLink
+                    ? <a href={acctLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.accent, textDecoration: 'none' }}>{r.fields['Account Name'] || '—'}</a>
+                    : (r.fields['Account Name'] || '—')}
+                </td>
+                <td style={{ ...tdStyle, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {oppLink
+                    ? <a href={oppLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.accent, textDecoration: 'none' }}>{r.fields['Opp Name'] || '—'}</a>
+                    : '—'}
+                </td>
+                <td style={tdStyle}>{r.fields['Owner'] || r.fields['sfdc_owner_name'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['Booked By'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['Stage'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
+                <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {meta && meta.totalPages > 1 && (
@@ -1349,6 +1363,31 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
         />
       )}
 
+      {/* Pipeline List — right below stage funnel */}
+      {pipelineData && (
+        <div style={{ marginBottom: 14 }}>
+          <button
+            onClick={() => setTableExpanded((e) => !e)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              background: C.surface, border: `1px solid ${C.border}`, borderRadius: tableExpanded ? '10px 10px 0 0' : 10,
+              padding: '10px 16px', cursor: 'pointer', color: C.textSec, fontSize: 13, fontWeight: 600,
+            }}
+          >
+            <span style={{ color: C.textMuted, fontSize: 11, transform: tableExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▶</span>
+            Pipeline List ({(meta?.total ?? 0).toLocaleString()} accounts)
+            <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
+              {tableExpanded ? '— click to collapse' : '— click to expand'}
+            </span>
+          </button>
+          {tableExpanded && (
+            <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden' }}>
+              <PipelineListTable records={records} meta={meta} page={page} setPage={setPage} />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Mini distribution charts — clickable (Change 7) */}
       {agg && <PipelineCharts agg={agg} filters={filters} setFilters={setFilters} />}
 
@@ -1380,31 +1419,6 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
 
       {/* Active Deals */}
       {records && <ActiveDealsCallout records={records} />}
-
-      {/* Collapsible Account Table */}
-      {pipelineData && (
-        <div style={{ marginBottom: 14 }}>
-          <button
-            onClick={() => setTableExpanded((e) => !e)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-              background: C.surface, border: `1px solid ${C.border}`, borderRadius: tableExpanded ? '10px 10px 0 0' : 10,
-              padding: '10px 16px', cursor: 'pointer', color: C.textSec, fontSize: 13, fontWeight: 600,
-            }}
-          >
-            <span style={{ color: C.textMuted, fontSize: 11, transform: tableExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▶</span>
-            Pipeline List ({(meta?.total ?? 0).toLocaleString()} accounts)
-            <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
-              {tableExpanded ? '— click to collapse' : '— click to expand'}
-            </span>
-          </button>
-          {tableExpanded && (
-            <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden' }}>
-              <PipelineListTable records={records} meta={meta} page={page} setPage={setPage} />
-            </div>
-          )}
-        </div>
-      )}
 
       {meta && (
         <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'right', marginTop: 8 }}>
