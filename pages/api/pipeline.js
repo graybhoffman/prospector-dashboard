@@ -65,9 +65,14 @@ function oppToRecord(row) {
     fields: {
       'Account Name': row.account_name,
       'Stage':        row.stage_normalized,
-      'EHR':          row.ehr || null,
+      'EHR':          row.ehr || row.acct_ehr_system || null,
       'ACV':          row.acv != null ? Number(row.acv) : 0,
       'Close Date':   row.close_date,
+      'Owner':        row.owner || null,
+      'Specialty':    row.acct_specialty || null,
+      'Source Category': row.acct_source_category || null,
+      'Est. Calls/Month': row.est_monthly_call_volume != null ? Number(row.est_monthly_call_volume) : null,
+      'Booked By':    row.booked_by || null,
       'SFDC Link':    row.sfdc_id
         ? `https://athelas.lightning.force.com/lightning/r/Opportunity/${row.sfdc_id}/view`
         : (row.sfdc_link || null),
@@ -314,6 +319,17 @@ export default async function handler(req, res) {
     }
     const accFilterNoStage = buildAccountFiltersNoStage();
 
+    // For bar charts: if onlyDiscovery, use JOIN query to reflect stage filter
+    const filtEhrPromise = onlyDiscovery
+      ? query(`SELECT a.ehr_system AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, oppFilter.params)
+      : query(`SELECT ehr_system    AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
+    const filtSpecialtyPromise = onlyDiscovery
+      ? query(`SELECT a.specialty AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} AND a.specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, oppFilter.params)
+      : query(`SELECT specialty     AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, accFilterNoStage.params);
+    const filtSourcePromise = onlyDiscovery
+      ? query(`SELECT a.source_category AS val, COUNT(*) FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, oppFilter.params)
+      : query(`SELECT source_category AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params);
+
     // Run all filtered aggregation queries in parallel
     // Note: FILT_STAGE_SQL uses accFilter.params for accounts side and oppFilter.params for opps side
     // We run them as two separate queries and merge
@@ -335,9 +351,9 @@ export default async function handler(req, res) {
         oppFilter.params
       ),
       query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where}`, accFilterNoStage.params),
-      query(`SELECT ehr_system    AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params),
-      query(`SELECT specialty     AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 20`, accFilterNoStage.params),
-      query(`SELECT source_category AS val, COUNT(*) FROM accounts ${accFilterNoStage.where} GROUP BY 1 ORDER BY COUNT(*) DESC`, accFilterNoStage.params),
+      filtEhrPromise,
+      filtSpecialtyPromise,
+      filtSourcePromise,
       query(`SELECT COUNT(*) FROM accounts ${accFilterNoStage.where} AND specialty IS NOT NULL AND specialty != ''`, accFilterNoStage.params),
     ]);
 
@@ -392,7 +408,7 @@ export default async function handler(req, res) {
       const [cntRes, rowsRes] = await Promise.all([
         query(`SELECT COUNT(*) FROM opportunities ${oppFilter.where}`, oppFilter.params),
         query(
-          `SELECT * FROM opportunities ${oppFilter.where}
+          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where}
            ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
           rParams
         ),
@@ -422,7 +438,7 @@ export default async function handler(req, res) {
         const lPH = `$${oppFilter.params.length + 1}`;
         const oPH = `$${oppFilter.params.length + 2}`;
         const rowsRes = await query(
-          `SELECT * FROM opportunities ${oppFilter.where} ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
+          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
           rParams
         );
         records.push(...rowsRes.rows.map(oppToRecord));

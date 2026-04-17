@@ -63,7 +63,7 @@ const PIPELINE_STAGES = [
 // Default filter excludes Prospects
 const NON_PROSPECT_STAGES = PIPELINE_STAGES.filter((s) => s !== 'Prospect');
 // Default filter: show all stages (empty = no filter)
-const DEFAULT_PIPELINE_FILTERS = { stage: [] };
+const DEFAULT_PIPELINE_FILTERS = { stage: NON_PROSPECT_STAGES };
 
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
@@ -1239,10 +1239,68 @@ function PipelineCharts({ agg, filters, setFilters }) {
     </div>
   );
 }
+function PipelineListTable({ records, meta, page, setPage }) {
+  const [viewingAccountId, setViewingAccountId] = useState(null);
+  if (!records || records.length === 0) {
+    return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
+  }
+  const cols = ['Account Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV'];
+  const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
+  const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', background: C.surface }}>
+        <thead>
+          <tr>
+            {cols.map(c => <th key={c} style={thStyle}>{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {records.map(r => (
+            <tr
+              key={r.id}
+              onClick={() => setViewingAccountId(r.id)}
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={e => e.currentTarget.style.background = C.bg}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <td style={{ ...tdStyle, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', color: C.textPri, fontSize: 11 }}>{r.fields['Account Name'] || '—'}</td>
+              <td style={tdStyle}>{r.fields['Owner'] || r.fields['sfdc_owner_name'] || '—'}</td>
+              <td style={tdStyle}>{r.fields['Booked By'] || '—'}</td>
+              <td style={tdStyle}>{r.fields['Stage'] || '—'}</td>
+              <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
+              <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
+              <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {meta && meta.totalPages > 1 && (
+        <div style={{ display: 'flex', gap: 8, padding: '10px 16px', alignItems: 'center', justifyContent: 'flex-end', borderTop: `1px solid ${C.border}` }}>
+          <button
+            disabled={page <= 1}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            style={{ padding: '4px 12px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, cursor: page <= 1 ? 'not-allowed' : 'pointer', opacity: page <= 1 ? 0.5 : 1, fontSize: 12 }}
+          >Prev</button>
+          <span style={{ color: C.textMuted, fontSize: 11 }}>Page {page} / {meta.totalPages}</span>
+          <button
+            disabled={page >= meta.totalPages}
+            onClick={() => setPage(p => Math.min(meta.totalPages, p + 1))}
+            style={{ padding: '4px 12px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, cursor: page >= meta.totalPages ? 'not-allowed' : 'pointer', opacity: page >= meta.totalPages ? 0.5 : 1, fontSize: 12 }}
+          >Next</button>
+        </div>
+      )}
+      {viewingAccountId && (
+        <AccountDetailPopup id={viewingAccountId} onClose={() => setViewingAccountId(null)} />
+      )}
+    </div>
+  );
+}
+
 function PipelineSection({ schema, pipelineData, isLoading, error, filters, setFilters, page, setPage }) {
   const [pipelineCols, togglePipelineCol, resetPipelineCols] =
     useColumnState('wt_pipeline_cols_v2', PIPELINE_DEFAULT_COLS);
-  const [tableExpanded, setTableExpanded] = useState(false);
+  const [tableExpanded, setTableExpanded] = useState(true);
 
   // Fetch activity data for WoW/MoM (Change 9)
   const { data: activityData } = useSWR('/api/activity', fetcher, {
@@ -1335,19 +1393,14 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
             }}
           >
             <span style={{ color: C.textMuted, fontSize: 11, transform: tableExpanded ? 'rotate(90deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▶</span>
-            Account List ({(meta?.total ?? 0).toLocaleString()} accounts)
+            Pipeline List ({(meta?.total ?? 0).toLocaleString()} accounts)
             <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
               {tableExpanded ? '— click to collapse' : '— click to expand'}
             </span>
           </button>
           {tableExpanded && (
             <div style={{ border: `1px solid ${C.border}`, borderTop: 'none', borderRadius: '0 0 10px 10px', overflow: 'hidden' }}>
-              <AccountTable
-                records={records} meta={meta} page={page} setPage={setPage}
-                visibleCols={pipelineCols} allCols={propOrder}
-                onToggleCol={togglePipelineCol} onResetCols={resetPipelineCols}
-                schemaProps={schemaProps}
-              />
+              <PipelineListTable records={records} meta={meta} page={page} setPage={setPage} />
             </div>
           )}
         </div>
