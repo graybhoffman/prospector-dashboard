@@ -593,7 +593,14 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                 {/* Row: Owner | (spacer — or use full row) */}
                 <div>
                   <div style={labelStyle}>Owner</div>
-                  <input style={inputStyle} value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))} />
+                  <select style={inputStyle} value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    <option>Gray Hoffman</option>
+                    <option>Andrew Sapien</option>
+                    <option>Neha Bhongir</option>
+                    <option>Adam Mohiuddin</option>
+                    <option>Manish</option>
+                  </select>
                 </div>
                 <div />
                 {/* Row: Practice Size | Demo Status */}
@@ -630,7 +637,14 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                 </div>
                 <div>
                   <div style={labelStyle}>Booked By</div>
-                  <input style={inputStyle} value={form.booked_by} onChange={e => setForm(f => ({ ...f, booked_by: e.target.value }))} />
+                  <select style={inputStyle} value={form.booked_by} onChange={e => setForm(f => ({ ...f, booked_by: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    <option>Gray Hoffman</option>
+                    <option>Andrew Sapien</option>
+                    <option>Neha Bhongir</option>
+                    <option>Adam Mohiuddin</option>
+                    <option>Manish</option>
+                  </select>
                 </div>
                 {/* Full width: Pre Demo Notes */}
                 <div style={{ gridColumn: '1 / -1' }}>
