@@ -1260,7 +1260,7 @@ function PipelineCharts({ agg, filters, setFilters }) {
   );
 }
 function PipelineListTable({ records, meta, page, setPage }) {
-  const [viewingAccountId, setViewingAccountId] = useState(null);
+  const [editingOppId, setEditingOppId] = useState(null);
   if (!records || records.length === 0) {
     return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
   }
@@ -1283,7 +1283,11 @@ function PipelineListTable({ records, meta, page, setPage }) {
             return (
               <tr
                 key={r.id}
-                onClick={() => setViewingAccountId(r.id)}
+                onClick={() => {
+                  // Extract numeric DB id from 'opp_N' format
+                  const oid = String(r.id).startsWith('opp_') ? String(r.id).replace('opp_', '') : String(r.id);
+                  setEditingOppId(oid);
+                }}
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = C.bg}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -1324,8 +1328,8 @@ function PipelineListTable({ records, meta, page, setPage }) {
           >Next</button>
         </div>
       )}
-      {viewingAccountId && (
-        <AccountDetailPopup id={viewingAccountId} onClose={() => setViewingAccountId(null)} />
+      {editingOppId && (
+        <OppEditPopup id={editingOppId} onClose={() => setEditingOppId(null)} onSaved={() => setEditingOppId(null)} />
       )}
     </div>
   );
