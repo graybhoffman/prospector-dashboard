@@ -4363,7 +4363,7 @@ function OutreachCallDetailTable() {
                   <td style={{ ...tdS, color: c.connected ? C.green : C.textMuted }}>
                     {c.disposition || (c.connected ? '✅ Answered' : '—')}
                   </td>
-                  <td style={tdS}>{c.duration ? `${Math.round(c.duration)}s` : '—'}</td>
+                  <td style={tdS}>{c.duration ? (c.duration >= 60 ? `${Math.floor(c.duration/60)}m ${c.duration%60}s` : `${c.duration}s`) : '—'}</td>
                   <td style={tdS}>
                     {c.recordingUrl
                       ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" style={{ color: C.accent, fontSize: 11 }}>🎙 Listen</a>

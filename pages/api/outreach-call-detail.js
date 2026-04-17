@@ -77,12 +77,18 @@ export default async function handler(req, res) {
             ? `https://app2a.outreach.io/prospects/${prospectId}/activities`
             : null;
 
+          // Compute duration from dialedAt→completedAt if duration field is null
+          let duration = attrs.duration || null;
+          if (!duration && attrs.dialedAt && attrs.completedAt) {
+            duration = Math.round((new Date(attrs.completedAt) - new Date(attrs.dialedAt)) / 1000);
+          }
+
           calls.push({
             id: call.id,
             userId,
             rep: USER_NAMES[userId] || `User ${userId}`,
             createdAt: attrs.createdAt,
-            duration: attrs.duration || null,
+            duration,
             connected,
             disposition: dispName || null,
             answeredAt: attrs.answeredAt || null,
