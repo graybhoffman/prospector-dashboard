@@ -4320,7 +4320,7 @@ function EmptyRow({ cols, msg = 'No activity today yet' }) {
 
 // ── Outreach Call Detail Table (live from Outreach API) ──────────────────────
 function OutreachCallDetailTable() {
-  const [connectedOnly, setConnectedOnly] = React.useState(false);
+  const [connectedOnly, setConnectedOnly] = useState(false);
   const url = `/api/outreach-call-detail?window=today${connectedOnly ? '&connectedOnly=true' : ''}`;
   const { data, isLoading, error } = useSWR(url, fetcher, { revalidateOnFocus: false, refreshInterval: 5 * 60000 });
   const calls = data?.calls || [];
