@@ -128,7 +128,22 @@ export default async function handler(req, res) {
       if (accRes?.rows?.length) {
         return res.status(200).json({ account: accRes.rows[0] });
       }
-      return res.status(404).json({ error: 'Account for opportunity not found' });
+      // No account in DB — return a synthetic stub from opp data so the popup can show something
+      const oppFull = await query(`SELECT * FROM opportunities WHERE id::text = $1 LIMIT 1`, [oppDbId]);
+      const oppRow = oppFull.rows[0] || {};
+      const stub = {
+        id: null,
+        sfdc_id: opp.sfdc_account_id || null,
+        name: opp.account_name,
+        sfdc_link: opp.sfdc_account_id
+          ? `https://athelas.lightning.force.com/lightning/r/Account/${opp.sfdc_account_id}/view`
+          : null,
+        ehr_system: oppRow.ehr || null,
+        agents_stage: oppRow.stage_normalized || null,
+        db_status: 'main',
+        _stub: true,
+      };
+      return res.status(200).json({ account: stub });
     } catch (err) {
       console.error('[accounts/[id] opp resolve]', err.message);
       return res.status(500).json({ error: err.message });
