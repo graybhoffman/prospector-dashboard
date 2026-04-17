@@ -42,7 +42,7 @@ const SKIP_FIELDS = new Set([
 ]);
 
 // Fields that can be edited on an opportunity
-const OPP_EDITABLE = ['name', 'stage_normalized', 'amount', 'close_date', 'owner'];
+const OPP_EDITABLE = ['name', 'stage_normalized', 'amount', 'close_date', 'owner', 'next_step', 'next_step_date'];
 
 const OPP_STAGE_OPTIONS = [
   'Prospect', 'Outreach', 'Discovery', 'Disco Scheduled', 'SQL',
@@ -402,6 +402,8 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
         amount:           opp.amount           != null ? String(opp.amount) : '',
         close_date:       opp.close_date       ? String(opp.close_date).slice(0, 10) : '',
         owner:            opp.owner            || '',
+        next_step:        opp.next_step        || '',
+        next_step_date:   opp.next_step_date   ? String(opp.next_step_date).slice(0, 10) : '',
       });
     }
   }, [opp]);
@@ -582,6 +584,14 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                 <div>
                   <div style={labelStyle}>Owner</div>
                   <input style={inputStyle} value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))} />
+                </div>
+                <div>
+                  <div style={labelStyle}>Next Step</div>
+                  <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} value={form.next_step} onChange={e => setForm(f => ({ ...f, next_step: e.target.value }))} placeholder="Next step notes..." />
+                </div>
+                <div>
+                  <div style={labelStyle}>Next Step Date</div>
+                  <input style={inputStyle} type="date" value={form.next_step_date} onChange={e => setForm(f => ({ ...f, next_step_date: e.target.value }))} />
                 </div>
               </div>
               {saveError && (

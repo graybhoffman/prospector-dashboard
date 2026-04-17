@@ -87,7 +87,7 @@ export default async function handler(req, res) {
 
   // ── PATCH ─────────────────────────────────────────────────────────────────
   if (req.method === 'PATCH') {
-    const { name, stage_normalized, amount, close_date, owner, owner_sfdc_id } = req.body || {};
+    const { name, stage_normalized, amount, close_date, owner, owner_sfdc_id, next_step, next_step_date } = req.body || {};
 
     try {
       // 1. Fetch current opp for sfdc_id
@@ -111,6 +111,8 @@ export default async function handler(req, res) {
       if (amount           != null) addSet('amount',           amount === '' ? null : Number(amount));
       if (close_date       != null) addSet('close_date',       close_date === '' ? null : close_date);
       if (owner            != null) addSet('owner',            owner);
+      if (next_step        != null) addSet('next_step',        next_step === '' ? null : next_step);
+      if (next_step_date   != null) addSet('next_step_date',   next_step_date === '' ? null : next_step_date);
 
       let updatedOpp = null;
       if (setClauses.length > 0) {
@@ -138,6 +140,8 @@ export default async function handler(req, res) {
           if (amount           != null && amount !== '') sfdcPayload.Amount    = Number(amount);
           if (close_date       != null && close_date !== '') sfdcPayload.CloseDate  = close_date;
           if (owner_sfdc_id)                              sfdcPayload.OwnerId   = owner_sfdc_id;
+          if (next_step        != null) sfdcPayload.NextStep          = next_step === '' ? null : next_step;
+          if (next_step_date   != null && next_step_date !== '') sfdcPayload.Next_Step_Date__c = next_step_date;
 
           if (Object.keys(sfdcPayload).length > 0) {
             const sfdcResp = await fetch(
