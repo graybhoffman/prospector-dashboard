@@ -1096,7 +1096,7 @@ function PaginationBtn({ disabled, onClick, children }) {
 // --- WoW/MoM Pipeline Stage Table (Change 9) ---
 const WOW_MOM_STAGES = ['Outreach', 'Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Pilot Deployment', 'Full Deployment'];
 
-function PipelineWowMom({ activityData }) {
+function PipelineWowMom({ activityData, contactsData }) {
   if (!activityData) {
     return <div style={{ color: C.textMuted, fontSize: 12, padding: '12px 0', textAlign: 'center' }}>⟳ Loading trend data…</div>;
   }
@@ -1108,17 +1108,37 @@ function PipelineWowMom({ activityData }) {
   const stageCountInPeriod = (stage, start, end) =>
     countInPeriod(items, [stage], start, end);
 
-  const wowRows = WOW_MOM_STAGES.map((stage) => {
+  const buildExtraRows = (periods, isWeek) => {
+    // Contacts Added row
+    const contactPeriods = isWeek ? contactsData?.weeks : contactsData?.months;
+    const contactCounts = contactPeriods
+      ? periods.map((_, i) => contactPeriods[i]?.count ?? 0)
+      : periods.map(() => 0);
+    const contactDelta = contactCounts[3] - contactCounts[2];
+
+    // Accounts Added row (Prospect entries)
+    const prospectCounts = periods.map(({ start, end }) => countInPeriod(items, ['Prospect'], start, end));
+    const prospectDelta = prospectCounts[3] - prospectCounts[2];
+
+    return [
+      { stage: 'Contacts Added', counts: contactCounts, delta: contactDelta },
+      { stage: 'Accounts Added', counts: prospectCounts, delta: prospectDelta },
+    ];
+  };
+
+  const wowStageRows = WOW_MOM_STAGES.map((stage) => {
     const counts = weeks.map(({ start, end }) => stageCountInPeriod(stage, start, end));
     return { stage, counts, delta: counts[3] - counts[2] };
   });
-  const wowTotals = weeks.map((_, wi) => wowRows.reduce((s, r) => s + r.counts[wi], 0));
+  const wowRows = [...buildExtraRows(weeks, true), ...wowStageRows];
+  const wowTotals = weeks.map((_, wi) => wowStageRows.reduce((s, r) => s + r.counts[wi], 0));
 
-  const momRows = WOW_MOM_STAGES.map((stage) => {
+  const momStageRows = WOW_MOM_STAGES.map((stage) => {
     const counts = months.map(({ start, end }) => stageCountInPeriod(stage, start, end));
     return { stage, counts, delta: counts[3] - counts[2] };
   });
-  const momTotals = months.map((_, mi) => momRows.reduce((s, r) => s + r.counts[mi], 0));
+  const momRows = [...buildExtraRows(months, false), ...momStageRows];
+  const momTotals = months.map((_, mi) => momStageRows.reduce((s, r) => s + r.counts[mi], 0));
 
   const thS = { padding: '5px 10px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 600, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.3px', whiteSpace: 'nowrap', background: C.surface };
   const tdS = { padding: '5px 10px', textAlign: 'center', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}1a` };
@@ -1321,6 +1341,10 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
     revalidateOnFocus: false,
     refreshInterval: 5 * 60 * 1000,
   });
+  const { data: contactsData } = useSWR('/api/contacts-activity', fetcher, {
+    revalidateOnFocus: false,
+    refreshInterval: 5 * 60 * 1000,
+  });
 
   const schemaProps = schema?.pipeline?.properties || {};
   const rawPropOrder = schema?.pipeline?.propOrder || [...PIPELINE_DEFAULT_COLS];
@@ -1400,7 +1424,7 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
       />
 
       {/* WoW / MoM stage trend tables (Change 9) */}
-      <PipelineWowMom activityData={activityData} />
+      <PipelineWowMom activityData={activityData} contactsData={contactsData} />
 
       {/* Error */}
       {error && (
@@ -1429,9 +1453,9 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
   );
 }
 
-// ─── Section 4: Account and Contact Changes ───────────────────────────────────
-// Change 10: replaced WoW/MoM stage transitions with 4-metric × 4-period tables
-function ActivitySection() {
+// ─── Section 4: Account and Contact Changes (removed — merged into PipelineWowMom) ───
+// function ActivitySection() {  // REMOVED
+function _ActivitySection_REMOVED() {
   const { data, error, isLoading } = useSWR('/api/activity', fetcher, {
     revalidateOnFocus: false,
     refreshInterval: 5 * 60 * 1000,
@@ -7141,7 +7165,7 @@ export default function Home() {
                   page={page}
                   setPage={setPage}
                 />
-                <ActivitySection />
+
               </>
             )}
             {dashSection === 'icpaccounts' && (
