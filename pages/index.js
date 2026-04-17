@@ -3390,20 +3390,22 @@ function DataQualityBanner() {
 
 // ─── Pipeline Pulse Section ───────────────────────────────────────────────────
 function PipelinePulseSection() {
-  const { data, error, isLoading, mutate } = useSWR('/api/pipeline-pulse', fetcher, {
-    revalidateOnFocus: false,
-    refreshInterval: 5 * 60_000,
-  });
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const { data, error, isLoading, mutate } = useSWR(
+    `/api/pipeline-pulse${ownerFilter ? `?owner=${encodeURIComponent(ownerFilter)}` : ''}`,
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 5 * 60_000 }
+  );
 
   const [nextStepDraft, setNextStepDraft] = useState({});
   const [editingId, setEditingId] = useState(null);
 
-  async function saveNextStep(accountId, value) {
+  async function saveNextStep(accountSfdcId, value) {
     try {
       await fetch('/api/accounts', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId, field: 'next_step', value }),
+        body: JSON.stringify({ accountId: accountSfdcId, field: 'next_step', value }),
       });
       mutate();
     } catch (e) {
@@ -3411,15 +3413,16 @@ function PipelinePulseSection() {
     }
   }
 
-  const accounts = data?.accounts || [];
+  const opps = data?.opps || [];
+  const allOwners = data?.allOwners || [];
 
   const STAGE_BADGE_COLORS = {
-    'Discovery':         C.amber,
-    'SQL':               C.purple,
-    'Disco Scheduled':   C.blue,
-    'Negotiations':      C.teal,
-    'Pilot Deployment':  C.green,
-    'Full Deployment':   C.green,
+    'Discovery':        C.amber,
+    'SQL':              C.purple,
+    'Disco Scheduled':  C.blue,
+    'Negotiations':     C.teal,
+    'Pilot Deployment': C.green,
+    'Full Deployment':  C.green,
   };
 
   function alertIcon(days) {
@@ -3455,16 +3458,32 @@ function PipelinePulseSection() {
 
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <div style={{ color: C.textPri, fontWeight: 700, fontSize: 15 }}>
           📡 Pipeline Pulse — Discovery &amp; Beyond
-          {accounts.length > 0 && <span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12, marginLeft: 8 }}>({accounts.length} accounts)</span>}
+          {opps.length > 0 && <span style={{ color: C.textMuted, fontWeight: 400, fontSize: 12, marginLeft: 8 }}>({opps.length} opps)</span>}
         </div>
         <div style={{ color: C.textMuted, fontSize: 11, display: 'flex', gap: 12 }}>
           <span style={{ color: C.green }}>✅ ≤3d</span>
           <span style={{ color: C.amber }}>⚠️ 4–7d</span>
           <span style={{ color: C.red }}>🔴 &gt;7d</span>
         </div>
+      </div>
+
+      {/* Owner filter */}
+      <div style={{ marginBottom: 12 }}>
+        <select
+          value={ownerFilter}
+          onChange={e => setOwnerFilter(e.target.value)}
+          style={{
+            background: C.surface, color: ownerFilter ? C.accent : C.textSec,
+            border: `1px solid ${C.border}`, borderRadius: 6, padding: '5px 10px',
+            fontSize: 12, fontWeight: ownerFilter ? 600 : 400, cursor: 'pointer', outline: 'none',
+          }}
+        >
+          <option value=''>All owners</option>
+          {allOwners.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
       </div>
 
       {isLoading && (
@@ -3474,20 +3493,20 @@ function PipelinePulseSection() {
         <div style={{ color: C.red, fontSize: 13, padding: '10px 0' }}>⚠ Failed to load Pipeline Pulse.</div>
       )}
 
-      {!isLoading && accounts.length === 0 && (
+      {!isLoading && opps.length === 0 && (
         <div style={{ color: C.textMuted, textAlign: 'center', padding: '40px 0', fontSize: 13 }}>
-          No Discovery+ accounts found. Accounts in Discovery, SQL, Negotiations, Pilot or Full Deployment will appear here.
+          No pipeline opps found. Opportunities in Discovery, SQL, Negotiations, Pilot or Full Deployment will appear here.
         </div>
       )}
 
-      {accounts.length > 0 && (
+      {opps.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
               <thead>
                 <tr>
                   <th style={thS}>Alert</th>
-                  <th style={thS}>Account</th>
+                  <th style={thS}>Account / Opp</th>
                   <th style={thS}>Stage</th>
                   <th style={{ ...thS, textAlign: 'right' }}>ACV</th>
                   <th style={thS}>Owner</th>
@@ -3497,35 +3516,38 @@ function PipelinePulseSection() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((a) => {
-                  const days  = a.days_since_touch != null ? parseInt(a.days_since_touch, 10) : null;
+                {opps.map((r) => {
+                  const days  = r.days_since_touch != null ? parseInt(r.days_since_touch, 10) : null;
                   const color = daysBadgeColor(days);
-                  const isEditing = editingId === a.id;
-                  const draftVal  = nextStepDraft[a.id] ?? (a.next_step || '');
+                  const isEditing = editingId === r.id;
+                  const draftVal  = nextStepDraft[r.id] ?? (r.next_step || '');
+                  const ownerDiffers = r.account_owner && r.opp_owner && r.account_owner !== r.opp_owner;
                   return (
-                    <tr key={a.id} style={{ transition: 'background 0.1s' }}
+                    <tr key={r.id} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={e => e.currentTarget.style.background = C.cardHover}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <td style={{ ...tdS, fontSize: 16, textAlign: 'center' }}>{alertIcon(days)}</td>
                       <td style={tdS}>
-                        {a.sfdc_link
-                          ? <a href={a.sfdc_link} target="_blank" rel="noreferrer" style={{ color: C.accent, fontWeight: 500, textDecoration: 'none' }}>{a.name}</a>
-                          : <span style={{ color: C.textPri, fontWeight: 500 }}>{a.name}</span>}
+                        <div style={{ color: C.textPri, fontWeight: 500 }}>{r.opp_name || '—'}</div>
+                        {r.account_name && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{r.account_name}</div>}
                       </td>
                       <td style={tdS}>
                         <span style={{
-                          background: (STAGE_BADGE_COLORS[a.agents_stage] || C.blue) + '22',
-                          color:      STAGE_BADGE_COLORS[a.agents_stage] || C.blue,
-                          border:     `1px solid ${(STAGE_BADGE_COLORS[a.agents_stage] || C.blue)}44`,
+                          background: (STAGE_BADGE_COLORS[r.stage] || C.blue) + '22',
+                          color:      STAGE_BADGE_COLORS[r.stage] || C.blue,
+                          border:     `1px solid ${(STAGE_BADGE_COLORS[r.stage] || C.blue)}44`,
                           borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-                        }}>{a.agents_stage || '—'}</span>
+                        }}>{r.stage || '—'}</span>
                       </td>
                       <td style={{ ...tdS, textAlign: 'right', color: C.green }}>
-                        {a.acv ? fmt(a.acv, 'currency') : '—'}
+                        {r.acv ? fmt(r.acv, 'currency') : '—'}
                       </td>
-                      <td style={tdS}>{a.agents_owner || '—'}</td>
+                      <td style={tdS}>
+                        <div>{r.opp_owner || '—'}</div>
+                        {ownerDiffers && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{r.account_owner}</div>}
+                      </td>
                       <td style={{ ...tdS, whiteSpace: 'nowrap' }}>
-                        <span style={{ color: color }}>{relDate(a.last_touch_date)}</span>
+                        <span style={{ color: color }}>{relDate(r.last_touch_date)}</span>
                       </td>
                       <td style={{ ...tdS, textAlign: 'center' }}>
                         {days != null
@@ -3538,10 +3560,10 @@ function PipelinePulseSection() {
                             <input
                               autoFocus
                               value={draftVal}
-                              onChange={e => setNextStepDraft(prev => ({ ...prev, [a.id]: e.target.value }))}
-                              onBlur={() => { saveNextStep(a.sfdc_id || String(a.id), draftVal); setEditingId(null); }}
+                              onChange={e => setNextStepDraft(prev => ({ ...prev, [r.id]: e.target.value }))}
+                              onBlur={() => { saveNextStep(r.account_sfdc_id, draftVal); setEditingId(null); }}
                               onKeyDown={e => {
-                                if (e.key === 'Enter') { saveNextStep(a.sfdc_id || String(a.id), draftVal); setEditingId(null); }
+                                if (e.key === 'Enter') { saveNextStep(r.account_sfdc_id, draftVal); setEditingId(null); }
                                 if (e.key === 'Escape') setEditingId(null);
                               }}
                               style={{ background: C.surface, color: C.textPri, border: `1px solid ${C.accent}`, borderRadius: 4, padding: '3px 8px', width: '100%', fontSize: 12, outline: 'none' }}
@@ -3549,11 +3571,11 @@ function PipelinePulseSection() {
                           )
                           : (
                             <span
-                              onClick={() => { setNextStepDraft(prev => ({ ...prev, [a.id]: a.next_step || '' })); setEditingId(a.id); }}
-                              style={{ cursor: 'pointer', color: a.next_step ? C.textSec : C.textMuted, display: 'block', minWidth: 40 }}
+                              onClick={() => { setNextStepDraft(prev => ({ ...prev, [r.id]: r.next_step || '' })); setEditingId(r.id); }}
+                              style={{ cursor: 'pointer', color: r.next_step ? C.textSec : C.textMuted, display: 'block', minWidth: 40 }}
                               title="Click to edit"
                             >
-                              {a.next_step || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>click to add…</span>}
+                              {r.next_step || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>click to add…</span>}
                             </span>
                           )}
                       </td>
