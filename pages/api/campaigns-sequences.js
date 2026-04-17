@@ -130,6 +130,7 @@ export default async function handler(req, res) {
         name: seq.attributes?.name || `Sequence ${seqId}`,
         ownerName,
         enabled: seq.attributes?.enabled !== false,
+        updatedAt: seq.attributes?.updatedAt || null,
         activeCount,
         totalContacts,
         accountCount,

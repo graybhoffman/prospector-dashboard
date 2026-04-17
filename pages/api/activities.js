@@ -20,12 +20,14 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
+const AGENTS_TEAM_OUTREACH_IDS = ['1040', '865', '871', '1043', '1044'];
+
 export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { date, type, window: win, limit = 200, teamUserNames } = req.query;
+  const { date, type, window: win, limit = 200, teamUserNames, agentsTeam } = req.query;
 
   let dateFilter = '';
   const params = [];
@@ -41,8 +43,13 @@ export default async function handler(req, res) {
   let extraFilter = '';
   let teamFilter = '';
 
-  // Team filter: filter by rep names
-  if (teamUserNames) {
+  // Agents team filter: filter by Outreach user IDs
+  if (agentsTeam === 'true') {
+    const placeholders = AGENTS_TEAM_OUTREACH_IDS.map((_, i) => `$${params.length + i + 1}`).join(', ');
+    teamFilter = `AND a.source_system = 'outreach' AND a.outreach_user_id IN (${placeholders})`;
+    params.push(...AGENTS_TEAM_OUTREACH_IDS);
+  } else if (teamUserNames) {
+    // Team filter: filter by rep names
     const names = teamUserNames.split(',').map(n => n.trim()).filter(Boolean);
     if (names.length > 0) {
       const placeholders = names.map((_, i) => `$${params.length + i + 1}`).join(', ');

@@ -1264,7 +1264,7 @@ function PipelineListTable({ records, meta, page, setPage }) {
   if (!records || records.length === 0) {
     return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
   }
-  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV'];
+  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV', 'Next Step Notes'];
   const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   return (
@@ -1308,6 +1308,7 @@ function PipelineListTable({ records, meta, page, setPage }) {
                 <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
                 <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
                 <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
+                <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'normal', lineHeight: '1.4' }}>{r.fields['Next Step'] || r.fields['next_step'] || '—'}</td>
               </tr>
             );
           })}
@@ -3506,13 +3507,15 @@ function PipelinePulseSection() {
               <thead>
                 <tr>
                   <th style={thS}>Alert</th>
-                  <th style={thS}>Account / Opp</th>
+                  <th style={thS}>Account</th>
+                  <th style={thS}>Opp</th>
                   <th style={thS}>Stage</th>
                   <th style={{ ...thS, textAlign: 'right' }}>ACV</th>
                   <th style={thS}>Owner</th>
                   <th style={thS}>Last Touch</th>
                   <th style={{ ...thS, textAlign: 'center' }}>Days</th>
                   <th style={{ ...thS, minWidth: 200 }}>Next Step</th>
+                  <th style={{ ...thS, minWidth: 160 }}>Next Step Notes</th>
                 </tr>
               </thead>
               <tbody>
@@ -4305,6 +4308,74 @@ function EmptyRow({ cols, msg = 'No activity today yet' }) {
   );
 }
 
+// ── Outreach Call Detail Table (live from Outreach API) ──────────────────────
+function OutreachCallDetailTable() {
+  const [connectedOnly, setConnectedOnly] = React.useState(false);
+  const url = `/api/outreach-call-detail?window=today${connectedOnly ? '&connectedOnly=true' : ''}`;
+  const { data, isLoading, error } = useSWR(url, fetcher, { revalidateOnFocus: false, refreshInterval: 5 * 60000 });
+  const calls = data?.calls || [];
+
+  const thS = { padding: '6px 10px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600,
+    borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.3px', background: C.surface, whiteSpace: 'nowrap' };
+  const tdS = { padding: '6px 10px', fontSize: 12, borderBottom: `1px solid ${C.border}1a`, color: C.textSec, verticalAlign: 'middle' };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <span style={{ color: C.textSec, fontWeight: 600, fontSize: 12 }}>📞 Today&apos;s Calls</span>
+        {data && <span style={{ color: C.textMuted, fontSize: 11 }}>({data.total} total)</span>}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 5, color: C.textMuted, fontSize: 11, cursor: 'pointer', marginLeft: 8 }}>
+          <input type="checkbox" checked={connectedOnly} onChange={e => setConnectedOnly(e.target.checked)} style={{ accentColor: C.green }} />
+          Connected only
+        </label>
+      </div>
+      {isLoading && <div style={{ color: C.textMuted, fontSize: 12, padding: '10px 0' }}>⟳ Loading calls…</div>}
+      {error && <div style={{ color: C.red, fontSize: 12 }}>⚠ Failed to load call detail</div>}
+      {!isLoading && calls.length === 0 && <div style={{ color: C.textMuted, fontSize: 12 }}>No calls found for today.</div>}
+      {calls.length > 0 && (
+        <div style={{ overflowX: 'auto', border: `1px solid ${C.border}`, borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', background: C.surface, minWidth: 600 }}>
+            <thead>
+              <tr>
+                <th style={thS}>Time</th>
+                <th style={thS}>Rep</th>
+                <th style={thS}>Connected</th>
+                <th style={thS}>Duration</th>
+                <th style={thS}>Recording</th>
+                <th style={thS}>In Outreach</th>
+              </tr>
+            </thead>
+            <tbody>
+              {calls.map((c, i) => (
+                <tr key={c.id} style={{ background: i % 2 === 0 ? 'transparent' : C.bg + '44' }}>
+                  <td style={tdS}>{c.createdAt ? new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                  <td style={tdS}>{c.rep}</td>
+                  <td style={{ ...tdS, color: c.connected ? C.green : C.textMuted }}>
+                    {c.connected ? '✅ Yes' : '—'}
+                  </td>
+                  <td style={tdS}>{c.duration ? `${Math.round(c.duration)}s` : '—'}</td>
+                  <td style={tdS}>
+                    {c.recordingUrl
+                      ? <a href={c.recordingUrl} target="_blank" rel="noreferrer" style={{ color: C.accent, fontSize: 11 }}>🎙 Listen</a>
+                      : c.voicemailUrl
+                        ? <a href={c.voicemailUrl} target="_blank" rel="noreferrer" style={{ color: C.teal, fontSize: 11 }}>📬 VM</a>
+                        : <span style={{ color: C.textMuted }}>—</span>}
+                  </td>
+                  <td style={tdS}>
+                    {c.outreachLink
+                      ? <a href={c.outreachLink} target="_blank" rel="noreferrer" style={{ color: C.accent, fontSize: 11 }}>↗ View</a>
+                      : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Outbound Calls table
 function OutboundCallsTable({ teamSuffix = '' }) {
   const { data, isLoading } = useSWR(`/api/activities?window=today&type=call${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
@@ -4737,9 +4808,7 @@ function AgentsTeamActivity() {
       }
     } catch {}
   }, []);
-  const agentsSuffix = agentsTeamUserNames.length > 0
-    ? `&teamUserNames=${encodeURIComponent(agentsTeamUserNames.join(','))}`
-    : '';
+  const agentsSuffix = '&agentsTeam=true';
 
   return (
     <div>
@@ -4772,17 +4841,15 @@ function AgentsTeamActivity() {
         </div>
       </DashSection>
 
-      {/* ── Daily Detail Tables (SFDC-sourced until Outreach detail API is available) ── */}
-      {agentsTeamUserNames.length > 0 && (
-        <DashSection title="📋 Agents Team Daily Detail" accent={C.purple} defaultOpen={false}>
-          <ActivitySyncBanner onRefresh={() => { if (typeof window !== 'undefined' && window.__SWR_MUTATE__) window.__SWR_MUTATE__(); }} />
+      {/* ── Daily Detail Tables (Outreach-sourced) ── */}
+      <DashSection title="📋 Agents Team Daily Detail" accent={C.purple} defaultOpen={false}>
+          <OutreachCallDetailTable />
           <OutboundCallsTable teamSuffix={agentsSuffix} />
           <LiveConnectsTable teamSuffix={agentsSuffix} />
           <ContactsContactedTable teamSuffix={agentsSuffix} />
           <AccountsContactedTable teamSuffix={agentsSuffix} />
           <SetsTable teamSuffix={agentsSuffix} />
         </DashSection>
-      )}
 
       {/* ── This Week's Stats ── */}
       <DashSection title={`📅 This Week — ${getWeekRange()}`} accent={C.teal}>

@@ -14,6 +14,7 @@
  */
 
 import { getAccessToken } from '../../lib/outreach';
+import { query } from '../../lib/db';
 
 // ─── AGENTS TEAM CONFIG ────────────────────────────────────────────────────
 // To add a team member: add their Outreach user ID to this array
@@ -54,7 +55,7 @@ async function getStatsForRange(startISO, endISO, token) {
         for (const call of (data.data || [])) {
           stats.calls++;
           const attrs = call.attributes || {};
-          if (attrs.answered) stats.connects++;
+          if (attrs.answeredAt) stats.connects++;
           // Sets: look for disposition indicating meeting booked
           const disp = (attrs.disposition || attrs.outcome || '').toLowerCase();
           if (disp.includes('meeting') || disp.includes('demo') || disp.includes('set') || disp.includes('booked')) stats.sets++;
@@ -87,6 +88,18 @@ async function getStatsForRange(startISO, endISO, token) {
   stats.contactsContacted = contactIds.size;
   // accountsContacted: approximate from unique contact count (can refine later)
   stats.accountsContacted = Math.ceil(contactIds.size * 0.6); // rough estimate
+
+  // Discovery Sets: count new opportunities created in this period
+  try {
+    const oppRes = await query(
+      `SELECT COUNT(*) FROM opportunities WHERE created_at >= $1 AND created_at < $2`,
+      [startISO, endISO]
+    );
+    stats.sets = parseInt(oppRes.rows[0].count, 10) || 0;
+  } catch (e) {
+    console.error('[activity-stats] sets from opps:', e.message);
+    // fallback: keep call-disposition-based count
+  }
 
   return stats;
 }

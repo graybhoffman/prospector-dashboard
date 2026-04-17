@@ -421,7 +421,7 @@ export default async function handler(req, res) {
       const [cntRes, rowsRes] = await Promise.all([
         query(`SELECT COUNT(*) FROM opportunities ${oppFilter.where}`, oppFilter.params),
         query(
-          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where}
+          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name, a.next_step AS acct_next_step FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where}
            ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
           rParams
         ),
@@ -451,7 +451,7 @@ export default async function handler(req, res) {
         const lPH = `$${oppFilter.params.length + 1}`;
         const oPH = `$${oppFilter.params.length + 2}`;
         const rowsRes = await query(
-          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
+          `SELECT o.*, a.ehr_system AS acct_ehr_system, a.specialty AS acct_specialty, a.source_category AS acct_source_category, a.est_monthly_call_volume, a.sfdc_owner_name AS acct_owner_name, a.next_step AS acct_next_step FROM opportunities o LEFT JOIN accounts a ON a.sfdc_id = o.account_sfdc_id ${oppFilter.where} ORDER BY account_name ASC LIMIT ${lPH} OFFSET ${oPH}`,
           rParams
         );
         records.push(...rowsRes.rows.map(oppToRecord));
