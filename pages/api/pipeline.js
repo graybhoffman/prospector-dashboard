@@ -79,7 +79,7 @@ function oppToRecord(row) {
         ? `https://athelas.lightning.force.com/lightning/r/Opportunity/${row.sfdc_id}/view`
         : (row.sfdc_link || null),
       'Next Step':    row.acct_next_step || row.next_step || null,
-      'Next Step Date': row.next_step_date ? String(row.next_step_date).slice(0, 10) : null,
+      'Next Step Date': row.next_step_date ? (row.next_step_date instanceof Date ? row.next_step_date.toISOString().slice(0, 10) : String(row.next_step_date).slice(0, 10)) : null,
       'Date Created': row.created_at || null,
       '_type':        'opportunity',
     },
