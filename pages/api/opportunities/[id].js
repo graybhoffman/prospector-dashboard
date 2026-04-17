@@ -87,7 +87,8 @@ export default async function handler(req, res) {
 
   // ── PATCH ─────────────────────────────────────────────────────────────────
   if (req.method === 'PATCH') {
-    const { name, stage_normalized, amount, close_date, owner, owner_sfdc_id, next_step, next_step_date } = req.body || {};
+    const { name, stage_normalized, amount, close_date, owner, owner_sfdc_id, next_step, next_step_date,
+            practice_size, specialty, lead_source, demo_status, first_demo_date, iqm_notes, booked_by } = req.body || {};
 
     try {
       // 1. Fetch current opp for sfdc_id
@@ -113,6 +114,13 @@ export default async function handler(req, res) {
       if (owner            != null) addSet('owner',            owner);
       if (next_step        != null) addSet('next_step',        next_step === '' ? null : next_step);
       if (next_step_date   != null) addSet('next_step_date',   next_step_date === '' ? null : next_step_date);
+      if (practice_size    != null) addSet('practice_size',    practice_size === '' ? null : practice_size);
+      if (specialty        != null) addSet('specialty',        specialty === '' ? null : specialty);
+      if (lead_source      != null) addSet('lead_source',      lead_source === '' ? null : lead_source);
+      if (demo_status      != null) addSet('demo_status',      demo_status === '' ? null : demo_status);
+      if (first_demo_date  != null) addSet('first_demo_date',  first_demo_date === '' ? null : first_demo_date);
+      if (iqm_notes        != null) addSet('iqm_notes',        iqm_notes === '' ? null : iqm_notes);
+      if (booked_by        != null) addSet('booked_by',        booked_by === '' ? null : booked_by);
 
       let updatedOpp = null;
       if (setClauses.length > 0) {
@@ -142,6 +150,12 @@ export default async function handler(req, res) {
           if (owner_sfdc_id)                              sfdcPayload.OwnerId   = owner_sfdc_id;
           if (next_step        != null) sfdcPayload.NextStep          = next_step === '' ? null : next_step;
           if (next_step_date   != null && next_step_date !== '') sfdcPayload.Next_Step_Date__c = next_step_date;
+          if (practice_size    != null && practice_size !== '')   sfdcPayload.Practice_Size__c          = practice_size;
+          if (specialty        != null)                           sfdcPayload.Specialty__c               = specialty === '' ? null : specialty;
+          if (lead_source      != null && lead_source !== '')     sfdcPayload.LeadSource                 = lead_source;
+          if (demo_status      != null && demo_status !== '')     sfdcPayload.Demo_Status__c             = demo_status;
+          if (first_demo_date  != null && first_demo_date !== '') sfdcPayload.First_Demo_Meeting_Date__c = first_demo_date;
+          if (iqm_notes        != null)                           sfdcPayload.IQM_Notes__c               = iqm_notes === '' ? null : iqm_notes;
 
           if (Object.keys(sfdcPayload).length > 0) {
             const sfdcResp = await fetch(

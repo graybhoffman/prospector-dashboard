@@ -404,6 +404,13 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
         owner:            opp.owner            || '',
         next_step:        opp.next_step        || '',
         next_step_date:   opp.next_step_date   ? String(opp.next_step_date).slice(0, 10) : '',
+        practice_size:    opp.practice_size    || '',
+        specialty:        opp.specialty        || '',
+        lead_source:      opp.lead_source      || '',
+        demo_status:      opp.demo_status      || '',
+        first_demo_date:  opp.first_demo_date  ? String(opp.first_demo_date).slice(0,10) : '',
+        iqm_notes:        opp.iqm_notes        || '',
+        booked_by:        opp.booked_by        || '',
       });
     }
   }, [opp]);
@@ -561,7 +568,8 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
           {/* Edit form */}
           {editing && (
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '16px', marginBottom: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {/* Row: Name | Stage */}
                 <div>
                   <div style={labelStyle}>Name</div>
                   <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -573,6 +581,7 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                     {OPP_STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
+                {/* Row: Amount | Close Date */}
                 <div>
                   <div style={labelStyle}>Amount ($)</div>
                   <input style={inputStyle} type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="e.g. 50000" />
@@ -581,11 +590,55 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                   <div style={labelStyle}>Close Date</div>
                   <input style={inputStyle} type="date" value={form.close_date} onChange={e => setForm(f => ({ ...f, close_date: e.target.value }))} />
                 </div>
+                {/* Row: Owner | (spacer — or use full row) */}
                 <div>
                   <div style={labelStyle}>Owner</div>
                   <input style={inputStyle} value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))} />
                 </div>
+                <div />
+                {/* Row: Practice Size | Demo Status */}
                 <div>
+                  <div style={labelStyle}>Practice Size</div>
+                  <select style={inputStyle} value={form.practice_size} onChange={e => setForm(f => ({ ...f, practice_size: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    {['1-5','6-20','21-50','51-100','101+'].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={labelStyle}>Demo Status</div>
+                  <select style={inputStyle} value={form.demo_status} onChange={e => setForm(f => ({ ...f, demo_status: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    {['Scheduled','Cancelled','No Show','Pending Reschedule','Completed','Unqualified'].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                {/* Row: First Demo Meeting Date | Lead Source */}
+                <div>
+                  <div style={labelStyle}>First Demo Meeting Date</div>
+                  <input style={inputStyle} type="date" value={form.first_demo_date} onChange={e => setForm(f => ({ ...f, first_demo_date: e.target.value }))} />
+                </div>
+                <div>
+                  <div style={labelStyle}>Lead Source</div>
+                  <select style={inputStyle} value={form.lead_source} onChange={e => setForm(f => ({ ...f, lead_source: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    {['Advisor Outreach','Commure Scribe','Content Syndication','Cross Sell','Digital Event','Direct Traffic','Email','Event','Expansion Opportunity','Inbound','Other'].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                {/* Row: Provider Specialty | Booked By */}
+                <div>
+                  <div style={labelStyle}>Provider Specialty</div>
+                  <input style={inputStyle} value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} />
+                </div>
+                <div>
+                  <div style={labelStyle}>Booked By</div>
+                  <input style={inputStyle} value={form.booked_by} onChange={e => setForm(f => ({ ...f, booked_by: e.target.value }))} />
+                </div>
+                {/* Full width: Pre Demo Notes */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={labelStyle}>Pre Demo Notes</div>
+                  <textarea style={{ ...inputStyle, minHeight: 70, resize: 'vertical' }} value={form.iqm_notes} onChange={e => setForm(f => ({ ...f, iqm_notes: e.target.value }))} placeholder="Pre-demo notes..." />
+                </div>
+                {/* Row: Next Step | Next Step Date */}
+                <div style={{ gridColumn: '1 / -1' }}>
                   <div style={labelStyle}>Next Step</div>
                   <textarea style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} value={form.next_step} onChange={e => setForm(f => ({ ...f, next_step: e.target.value }))} placeholder="Next step notes..." />
                 </div>
