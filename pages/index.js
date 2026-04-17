@@ -1264,7 +1264,7 @@ function PipelineListTable({ records, meta, page, setPage }) {
   if (!records || records.length === 0) {
     return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
   }
-  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV', 'Date Created', 'Next Step Notes'];
+  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV', 'Date Created', 'Next Step Date', 'Next Step Notes'];
   const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
   return (
@@ -1309,6 +1309,7 @@ function PipelineListTable({ records, meta, page, setPage }) {
                 <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
                 <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
                 <td style={tdStyle}>{r.fields['Date Created'] ? new Date(r.fields['Date Created']).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}</td>
+                <td style={{ ...tdStyle, color: r.fields['Next Step Date'] ? C.accent : C.textMuted }}>{r.fields['Next Step Date'] ? new Date(r.fields['Next Step Date'] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
                 <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'normal', lineHeight: '1.4' }}>{r.fields['Next Step'] || r.fields['next_step'] || '—'}</td>
               </tr>
             );
