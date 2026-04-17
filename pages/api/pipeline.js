@@ -78,6 +78,7 @@ function oppToRecord(row) {
       'SFDC Link':    row.sfdc_id
         ? `https://athelas.lightning.force.com/lightning/r/Opportunity/${row.sfdc_id}/view`
         : (row.sfdc_link || null),
+      'Next Step':    row.acct_next_step || null,
       '_type':        'opportunity',
     },
   };
