@@ -3531,8 +3531,14 @@ function PipelinePulseSection() {
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <td style={{ ...tdS, fontSize: 16, textAlign: 'center' }}>{alertIcon(days)}</td>
                       <td style={tdS}>
-                        <div style={{ color: C.textPri, fontWeight: 500 }}>{r.opp_name || '—'}</div>
-                        {r.account_name && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 1 }}>{r.account_name}</div>}
+                        {r.account_sfdc_id
+                          ? <a href={`https://athelas.lightning.force.com/lightning/r/Account/${r.account_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.blue, fontWeight: 500 }}>{r.account_name || '—'}</a>
+                          : <span style={{ color: C.textPri, fontWeight: 500 }}>{r.account_name || '—'}</span>}
+                      </td>
+                      <td style={tdS}>
+                        {r.opp_sfdc_id
+                          ? <a href={`https://athelas.lightning.force.com/lightning/r/Opportunity/${r.opp_sfdc_id}/view`} target="_blank" rel="noopener noreferrer" style={{ color: C.accent }}>{r.opp_name || '—'}</a>
+                          : <span style={{ color: C.textSec }}>{r.opp_name || '—'}</span>}
                       </td>
                       <td style={tdS}>
                         <span style={{
@@ -3581,6 +3587,9 @@ function PipelinePulseSection() {
                               {r.next_step || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>click to add…</span>}
                             </span>
                           )}
+                      </td>
+                      <td style={{ ...tdS, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'normal', lineHeight: '1.4', color: C.textSec }}>
+                        {r.next_step || <span style={{ color: C.textMuted, fontStyle: 'italic' }}>—</span>}
                       </td>
                     </tr>
                   );
@@ -6597,7 +6606,12 @@ function CampaignsTab() {
           <div style={{ color: C.red, fontSize: 13 }}>⚠ {sequences.error}</div>
         )}
 
-        {Array.isArray(sequences) && sequences.map((seq) => {
+        {Array.isArray(sequences) && sequences.filter(seq => {
+          // Only show sequences with activity in last 7 days
+          if (!seq.updatedAt) return seq.activeCount > 0;
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          return new Date(seq.updatedAt).getTime() >= sevenDaysAgo;
+        }).map((seq) => {
           const isExpanded = expandedSeq === seq.id;
           const pd = seqProspects[seq.id];
           return (
