@@ -44,8 +44,10 @@ const EDITABLE_FIELDS = new Set([
 // Whitelist of columns that can be used in ORDER BY (prevent SQL injection)
 const SORTABLE_COLS = new Set([
   'name', 'domain', 'billing_state', 'industry', 'agents_stage', 'agents_owner',
-  'agents_icp', 'num_providers', 'num_employees', 'annual_revenue',
+  'agents_icp', 'num_providers', 'dhc_num_physicians', 'num_employees', 'annual_revenue',
+  'num_locations', 'dhc_num_locations', 'est_monthly_call_volume',
   'exclude_from_reporting', 'source_category', 'specialty', 'ehr',
+  'last_touch_date', 'sfdc_owner_name', 'potential_roe_issue',
 ]);
 
 export default async function handler(req, res) {
