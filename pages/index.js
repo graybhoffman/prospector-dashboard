@@ -5,6 +5,18 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+
+// ─── Mobile Hook ─────────────────────────────────────────────────────────────
+const useIsMobile = () => {
+  const [m, setM] = useState(false);
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return m;
+};
 import { useSession, signOut } from 'next-auth/react';
 import Head from 'next/head';
 import useSWR from 'swr';
@@ -56,14 +68,14 @@ const NOTION_COLOR = {
 };
 
 const PIPELINE_STAGES = [
-  'Prospect','Outreach','Discovery','SQL','Negotiations',
-  'Closed-Won','Pilot Deployment','Full Deployment',
+  'Prospect','Outreach','Warm Intro','Discovery','SQL','Negotiations',
+  'Closed-Won','Pilot Deployment','Full Deployment','Nurture',
 ];
 
 // Default filter excludes Prospects
 const NON_PROSPECT_STAGES = PIPELINE_STAGES.filter((s) => s !== 'Prospect');
 // Default filter: show all stages (empty = no filter)
-const DEFAULT_PIPELINE_FILTERS = { stage: ['Discovery','SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment'] };
+const DEFAULT_PIPELINE_FILTERS = { stage: [], hidePartners: true, closeDate60: false, nextStep30: false };
 
 const ACTIVE_STAGES = new Set(['SQL','Negotiations','Closed-Won','Pilot Deployment','Full Deployment']);
 
@@ -105,6 +117,9 @@ function buildPipelineUrl(filters, page, pageSize = 50, tick = 0) {
   if (filters.nonRcm)           p.set('nonRcm',   'true');
   if (filters.roe)              p.set('roe',       'true');
   if (filters.search)           p.set('search',    filters.search);
+  if (filters.hidePartners)     p.set('hide_partners', 'true');
+  if (filters.closeDate60)      p.set('close_date_days', '60');
+  if (filters.nextStep30)       p.set('next_step_days',  '30');
   if (tick) p.set('_t', tick);
   return `/api/pipeline?${p}`;
 }
@@ -269,6 +284,7 @@ function FieldValue({ value, type, fieldName, schemaProps }) {
 
 // ─── Collapsible Section ──────────────────────────────────────────────────────
 function Section({ id, title, subtitle, accent, children, defaultOpen = true, style: extraStyle }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{
@@ -301,7 +317,7 @@ function Section({ id, title, subtitle, accent, children, defaultOpen = true, st
         </div>
         <span style={{ color: C.textMuted, fontSize: 12, transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s', display:'inline-block' }}>▼</span>
       </button>
-      {open && <div style={{ padding: '16px 18px' }}>{children}</div>}
+      {open && <div style={{ padding: isMobile ? '12px 12px' : '16px 18px' }}>{children}</div>}
     </div>
   );
 }
@@ -342,20 +358,22 @@ function GoalsSection({ globals, currentMonth, statsLoading }) {
 
   const goalAccountUrl = (key) => {
     const stages = GOAL_STAGES[key] || [];
-    return `/api/pipeline?stage=${encodeURIComponent(stages.join(','))}&pageSize=100&page=1`;
+    const base = `/api/pipeline?stage=${encodeURIComponent(stages.join(','))}&pageSize=100&page=1`;
+    if (key === 'goal1') return base + '&hide_partners=true';
+    return base;
   };
 
   const { data: goal1Accounts } = useSWR(
     expandedGoal === 'goal1' ? goalAccountUrl('goal1') : null, fetcher,
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false, keepPreviousData: true }
   );
   const { data: goal2Accounts } = useSWR(
     expandedGoal === 'goal2' ? goalAccountUrl('goal2') : null, fetcher,
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false, keepPreviousData: true }
   );
   const { data: goal3Accounts } = useSWR(
     expandedGoal === 'goal3' ? goalAccountUrl('goal3') : null, fetcher,
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false, keepPreviousData: true }
   );
 
   const goalDataMap = { goal1: goal1Accounts, goal2: goal2Accounts, goal3: goal3Accounts };
@@ -785,7 +803,7 @@ function FiltersBar({ filters, setFilters, schemaProps, showingCount, defaultFil
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <MultiSelect label="EHR" options={getOptions('EHR')} selected={filters.ehr || []}
           onChange={(v) => setFilters((f) => ({ ...f, ehr: v }))} />
-        <MultiSelect label="Stage" options={PIPELINE_STAGES} selected={filters.stage || []}
+        <MultiSelect label="Account Stage (CCA)" options={PIPELINE_STAGES} selected={filters.stage || []}
           onChange={(v) => setFilters((f) => ({ ...f, stage: v }))} />
         <MultiSelect label="Specialty" options={getOptions('Specialty')} selected={filters.specialty || []}
           onChange={(v) => setFilters((f) => ({ ...f, specialty: v }))} />
@@ -1094,7 +1112,7 @@ function PaginationBtn({ disabled, onClick, children }) {
 // ─── Section 3: Pipeline ──────────────────────────────────────────────────────
 
 // --- WoW/MoM Pipeline Stage Table (Change 9) ---
-const WOW_MOM_STAGES = ['Outreach', 'Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Pilot Deployment', 'Full Deployment'];
+const WOW_MOM_STAGES = ['Outreach', 'Warm Intro', 'Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Pilot Deployment', 'Full Deployment', 'Nurture'];
 
 function PipelineWowMom({ activityData, contactsData }) {
   if (!activityData) {
@@ -1260,23 +1278,89 @@ function PipelineCharts({ agg, filters, setFilters }) {
   );
 }
 function PipelineListTable({ records, meta, page, setPage }) {
+  const isMobile = useIsMobile();
   const [editingOppId, setEditingOppId] = useState(null);
+  const [sortCol, setSortCol] = useState('next_step_date');
+  const [sortDir, setSortDir] = useState('asc');
+  const DEFAULT_COL_WIDTHS = {
+    'Account Name': 150, 'Opp Name': 170, 'Stage': 110, 'ACV': 90,
+    'Close Date': 90, 'Next Step Notes': 200, 'Next Step Date': 95,
+    'Source Category': 110, 'EHR': 90, 'Owner': 120, 'Booked By': 120,
+  };
+  const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS);
+  const resizingRef = useRef(null);
+
+  const startResize = (col, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[col] || 120;
+    resizingRef.current = { col, startX, startW };
+    const onMove = (mv) => {
+      const delta = mv.clientX - resizingRef.current.startX;
+      const newW = Math.max(50, resizingRef.current.startW + delta);
+      setColWidths(w => ({ ...w, [resizingRef.current.col]: newW }));
+    };
+    const onUp = () => {
+      resizingRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
   if (!records || records.length === 0) {
     return <div style={{ padding: '20px 16px', color: C.textMuted, fontSize: 13 }}>No records found.</div>;
   }
-  const cols = ['Account Name', 'Opp Name', 'Owner', 'Booked By', 'Stage', 'EHR', 'Est. Calls/Month', 'Implied ACV', 'Date Created', 'Next Step Date', 'Next Step Notes'];
-  const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
-  const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' };
+
+  const sortedRecords = [...records].sort((a, b) => {
+    let av = '', bv = '';
+    if (sortCol === 'next_step_date') { av = a.fields['Next Step Date'] || ''; bv = b.fields['Next Step Date'] || ''; }
+    else if (sortCol === 'close_date') { av = a.fields['Close Date'] || ''; bv = b.fields['Close Date'] || ''; }
+    else if (sortCol === 'created_at') { av = a.fields['Date Created'] || ''; bv = b.fields['Date Created'] || ''; }
+    if (!av && !bv) return 0;
+    if (!av) return 1;
+    if (!bv) return -1;
+    return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  const cols = ['Account Name', 'Opp Name', 'Stage', 'ACV', 'Close Date', 'Next Step Notes', 'Next Step Date', 'Source Category', 'EHR', 'Owner', 'Booked By'];
+  const SORT_COLS = { 'Date Created': 'created_at', 'Close Date': 'close_date', 'Next Step Date': 'next_step_date' };
+  const thStyle = { padding: '8px 10px', textAlign: 'left', color: C.textMuted, fontSize: 11, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', cursor: 'default', position: 'relative', userSelect: 'none' };
+  const thSortStyle = { ...thStyle, cursor: 'pointer' };
+  const tdStyle = { padding: '7px 10px', fontSize: 12, color: C.textSec, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 0 };
+  const resizeHandle = (col) => (
+    <div
+      onMouseDown={(e) => startResize(col, e)}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 1 }}
+    />
+  );
+
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', background: C.surface }}>
         <thead>
           <tr>
-            {cols.map(c => <th key={c} style={thStyle}>{c}</th>)}
+            {cols.map(c => {
+              const sk = SORT_COLS[c];
+              const active = sk && sortCol === sk;
+              return (
+                <th key={c} style={{ ...(sk ? thSortStyle : thStyle), width: colWidths[c], minWidth: colWidths[c] }} onClick={sk ? () => handleSort(sk) : undefined}>
+                  {c}{active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : (sk ? ' ↕' : '')}
+                  {resizeHandle(c)}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {records.map(r => {
+          {sortedRecords.map(r => {
             const acctSfdc = r.fields['Account SFDC ID'] || r.fields['sfdc_id'];
             const acctLink = acctSfdc ? `https://athelas.lightning.force.com/lightning/r/Account/${acctSfdc}/view` : null;
             const oppLink  = r.fields['SFDC Link'] || null;
@@ -1292,25 +1376,25 @@ function PipelineListTable({ records, meta, page, setPage }) {
                 onMouseEnter={e => e.currentTarget.style.background = C.bg}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
-                <td style={{ ...tdStyle, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', color: C.textPri, fontSize: 11 }}>
+                <td style={{ ...tdStyle, color: C.textPri, fontSize: 11 }}>
                   {acctLink
                     ? <a href={acctLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.accent, textDecoration: 'none' }}>{r.fields['Account Name'] || '—'}</a>
                     : (r.fields['Account Name'] || '—')}
                 </td>
-                <td style={{ ...tdStyle, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <td style={tdStyle}>
                   {oppLink
                     ? <a href={oppLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ color: C.accent, textDecoration: 'none' }}>{r.fields['Opp Name'] || '—'}</a>
                     : '—'}
                 </td>
+                <td style={tdStyle}>{r.fields['Stage'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
+                <td style={{ ...tdStyle, color: r.fields['Close Date'] ? C.textSec : C.textMuted }}>{r.fields['Close Date'] ? new Date(String(r.fields['Close Date']).slice(0,10) + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}</td>
+                <td style={{ ...tdStyle, whiteSpace: 'normal', lineHeight: '1.4' }}>{r.fields['Next Step'] || r.fields['next_step'] || '—'}</td>
+                <td style={{ ...tdStyle, color: r.fields['Next Step Date'] ? C.accent : C.textMuted }}>{r.fields['Next Step Date'] ? new Date(r.fields['Next Step Date'] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
+                <td style={tdStyle}>{r.fields['Source Category'] || '—'}</td>
+                <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
                 <td style={tdStyle}>{r.fields['Owner'] || r.fields['sfdc_owner_name'] || '—'}</td>
                 <td style={tdStyle}>{r.fields['Booked By'] || '—'}</td>
-                <td style={tdStyle}>{r.fields['Stage'] || '—'}</td>
-                <td style={tdStyle}>{r.fields['EHR'] || '—'}</td>
-                <td style={tdStyle}>{r.fields['Est. Calls/Month'] ? r.fields['Est. Calls/Month'].toLocaleString() : '—'}</td>
-                <td style={tdStyle}>{r.fields['ACV'] ? '$' + Math.round(r.fields['ACV']).toLocaleString() : '—'}</td>
-                <td style={tdStyle}>{r.fields['Date Created'] ? new Date(r.fields['Date Created']).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}</td>
-                <td style={{ ...tdStyle, color: r.fields['Next Step Date'] ? C.accent : C.textMuted }}>{r.fields['Next Step Date'] ? new Date(r.fields['Next Step Date'] + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</td>
-                <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'normal', lineHeight: '1.4' }}>{r.fields['Next Step'] || r.fields['next_step'] || '—'}</td>
               </tr>
             );
           })}
@@ -1345,11 +1429,11 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
 
   // Fetch activity data for WoW/MoM (Change 9)
   const { data: activityData } = useSWR('/api/activity', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 5 * 60 * 1000,
   });
   const { data: contactsData } = useSWR('/api/contacts-activity', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 5 * 60 * 1000,
   });
 
@@ -1384,6 +1468,26 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
 
   return (
     <Section id="pipeline" title="🔭 Pipeline Tracking" accent={SECTION_ACCENT.pipeline}>
+      {/* ── Pipeline Filter Bar ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Filters:</span>
+        {[
+          ['🤝 Hide Partners', 'hidePartners'],
+          ['📅 Close ≤60d', 'closeDate60'],
+          ['⏰ Next Step ≤30d', 'nextStep30'],
+        ].map(([label, key]) => {
+          const active = !!filters[key];
+          return (
+            <button key={key} onClick={() => setFilters(f => ({ ...f, [key]: !f[key] }))} style={{
+              background: active ? C.accent + '22' : C.card,
+              border: `1px solid ${active ? C.accent : C.border}`,
+              borderRadius: 7, color: active ? C.accent : C.textSec,
+              padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
+            }}>{label}</button>
+          );
+        })}
+      </div>
+
       {/* Stage Funnel — clickable, multi-select */}
       {agg && (
         <StageFunnel
@@ -1464,12 +1568,12 @@ function PipelineSection({ schema, pipelineData, isLoading, error, filters, setF
 // function ActivitySection() {  // REMOVED
 function _ActivitySection_REMOVED() {
   const { data, error, isLoading } = useSWR('/api/activity', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 5 * 60 * 1000,
   });
 
   const { data: contactsData } = useSWR('/api/contacts-activity', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 5 * 60 * 1000,
   });
 
@@ -1657,7 +1761,7 @@ function MarketAccountList({ globals, chartFilter }) {
   const { data, isLoading } = useSWR(
     expanded ? buildUrl() : null,
     fetcher,
-    { revalidateOnFocus: false, dedupingInterval: 10000 }
+    { revalidateOnFocus: false, keepPreviousData: true, dedupingInterval: 10000 }
   );
 
   const total = data?.meta?.total ?? 0;
@@ -1871,7 +1975,7 @@ function HBarChart({ data, color, maxItems = 15, onBarClick, selectedName }) {
 function CrosstabMatrix({ rowDim, colDim }) {
   const { data, isLoading } = useSWR(
     rowDim && colDim ? `/api/crosstab?row=${rowDim}&col=${colDim}` : null,
-    fetcher, { revalidateOnFocus: false }
+    fetcher, { revalidateOnFocus: false, keepPreviousData: true }
   );
 
   if (isLoading) return <div style={{ color: C.textMuted, fontSize: 12, padding: '20px 0' }}>Computing matrix…</div>;
@@ -1920,7 +2024,7 @@ function CrosstabMatrix({ rowDim, colDim }) {
 // ─── Ownership Bar Chart ──────────────────────────────────────────────────────
 function OwnershipBarChart({ chartCard, chartTitle }) {
   const { data, isLoading } = useSWR('/api/icp-ownership', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 5 * 60_000,
   });
 
@@ -2113,7 +2217,7 @@ function ContactsTab({ schema }) {
 
   const url = buildContactsUrl(filters, page);
   const { data, error, isLoading } = useSWR(url, fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     dedupingInterval: 5000,
   });
 
@@ -2313,9 +2417,9 @@ function DataSection() {
     return `/api/opportunities?${p}`;
   }
 
-  const { data: accData,  isLoading: accLoading  } = useSWR(subTab === 'accounts'     ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false });
-  const { data: conData,  isLoading: conLoading  } = useSWR(subTab === 'contacts'     ? buildConUrl() : null, fetcher, { revalidateOnFocus: false });
-  const { data: oppData,  isLoading: oppLoading  } = useSWR(subTab === 'opportunities'? buildOppUrl() : null, fetcher, { revalidateOnFocus: false });
+  const { data: accData,  isLoading: accLoading  } = useSWR(subTab === 'accounts'     ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: conData,  isLoading: conLoading  } = useSWR(subTab === 'contacts'     ? buildConUrl() : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: oppData,  isLoading: oppLoading  } = useSWR(subTab === 'opportunities'? buildOppUrl() : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
 
   const [searchDraft, setSearchDraft] = useState('');
   const searchRef = useRef(null);
@@ -2405,8 +2509,8 @@ function DataSection() {
     const total    = accData?.total || 0;
     const EHR_OPTIONS = ['eCW','Athena','ModMed','AdvancedMD','MEDITECH','Epic','Cerner','Other'];
     const STAGE_OPTIONS = [
-      'Prospect','Outreach','Discovery','SQL','Negotiations',
-      'Pilot Deployment','Full Deployment','Closed-Won',
+      'Prospect','Outreach','Warm Intro','Discovery','SQL','Negotiations',
+      'Pilot Deployment','Full Deployment','Closed-Won','Nurture',
     ];
 
     // ── Row Expand State ──────────────────────────────────────────────────
@@ -2558,7 +2662,7 @@ function DataSection() {
                       <div style={{ color: C.textSec, fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10, borderBottom: `1px solid ${C.border}`, paddingBottom: 6 }}>🔭 Pipeline</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {[
-                          { label: 'Stage',           val: acc.agents_stage },
+                          { label: 'Account Stage (CCA)', val: acc.agents_stage },
                           { label: 'Owner',           val: acc.agents_owner },
                           { label: 'ICP',             val: acc.agents_icp ? 'Yes ✓' : (acc.agents_icp === false ? 'No' : null) },
                           { label: 'Campaign Tags',   val: Array.isArray(acc.campaign_tag) ? acc.campaign_tag.join(', ') : acc.campaign_tag },
@@ -2928,9 +3032,9 @@ function DataSection() {
   }
 
   // Preload counts for header badges
-  const { data: accCountData } = useSWR('/api/accounts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
-  const { data: conCountData } = useSWR('/api/contacts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
-  const { data: oppCountData } = useSWR('/api/opportunities?page=1&pageSize=1', fetcher, { revalidateOnFocus: false });
+  const { data: accCountData } = useSWR('/api/accounts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: conCountData } = useSWR('/api/contacts?page=1&pageSize=1', fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: oppCountData } = useSWR('/api/opportunities?page=1&pageSize=1', fetcher, { revalidateOnFocus: false, keepPreviousData: true });
 
   function CountBadge({ n }) {
     if (n == null) return null;
@@ -2984,8 +3088,8 @@ function ManageTab() {
   const searchTimerRef = useRef(null);
 
   const STAGE_OPTIONS = [
-    'Prospect','Outreach','Discovery','SQL','Negotiations',
-    'Pilot Deployment','Full Deployment','Closed-Won',
+    'Prospect','Outreach','Warm Intro','Discovery','SQL','Negotiations',
+    'Pilot Deployment','Full Deployment','Closed-Won','Nurture',
   ];
 
   function buildAccUrl() {
@@ -2997,10 +3101,10 @@ function ManageTab() {
   }
 
   const { data: accData, isLoading: accLoading, mutate: accMutate } = useSWR(
-    subTab === 'accounts' ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false }
+    subTab === 'accounts' ? buildAccUrl() : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true }
   );
-  const { data: syncData } = useSWR(subTab === 'synclog' ? '/api/sync-log' : null, fetcher, { revalidateOnFocus: false });
-  const { data: dedupData, mutate: dedupMutate } = useSWR(subTab === 'dedup' ? '/api/dedup' : null, fetcher, { revalidateOnFocus: false });
+  const { data: syncData } = useSWR(subTab === 'synclog' ? '/api/sync-log' : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: dedupData, mutate: dedupMutate } = useSWR(subTab === 'dedup' ? '/api/dedup' : null, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
 
   function handleSearchInput(val) {
     setSearchDraft(val);
@@ -3341,7 +3445,7 @@ function ManageTab() {
 // ─── Data Quality Banner ─────────────────────────────────────────────────────
 function DataQualityBanner() {
   const { data, error } = useSWR('/api/data-quality', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 60_000,
   });
 
@@ -3397,7 +3501,7 @@ function PipelinePulseSection() {
   const { data, error, isLoading, mutate } = useSWR(
     `/api/pipeline-pulse${ownerFilter ? `?owner=${encodeURIComponent(ownerFilter)}` : ''}`,
     fetcher,
-    { revalidateOnFocus: false, refreshInterval: 5 * 60_000 }
+    { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 5 * 60_000 }
   );
 
   const [nextStepDraft, setNextStepDraft] = useState({});
@@ -3607,7 +3711,7 @@ function PipelinePulseSection() {
 
 // ─── Teams & Users Settings ───────────────────────────────────────────────────
 function TeamsSettings() {
-  const { data, mutate } = useSWR('/api/teams', fetcher, { revalidateOnFocus: false });
+  const { data, mutate } = useSWR('/api/teams', fetcher, { revalidateOnFocus: false, keepPreviousData: true });
   const teams = data?.teams || [];
   const repOptions = data?.reps || [];
 
@@ -4144,6 +4248,7 @@ function TeamsSettings() {
 
 // ─── Collapsible Dashboard Section ───────────────────────────────────────────
 function DashSection({ title, defaultOpen = true, accent = '#6366f1', storageKey = null, children }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(() => {
     if (storageKey && typeof window !== 'undefined') {
       const saved = localStorage.getItem(storageKey);
@@ -4170,13 +4275,14 @@ function DashSection({ title, defaultOpen = true, accent = '#6366f1', storageKey
         <span style={{ color: C.textPri, fontWeight: 700, fontSize: 14 }}>{title}</span>
         <span style={{ color: C.textMuted, fontSize: 12, transform: open ? 'rotate(180deg)' : 'none', transition: '0.2s', display: 'inline-block' }}>▼</span>
       </button>
-      {open && <div style={{ padding: '14px 16px' }}>{children}</div>}
+      {open && <div style={{ padding: isMobile ? '10px 10px' : '14px 16px' }}>{children}</div>}
     </div>
   );
 }
 
 // ─── Activity Metric Card ─────────────────────────────────────────────────────
 function ActivityMetricCard({ emoji, label, value, target, loading, note }) {
+  const isMobile = useIsMobile();
   const pct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : null;
   const status = pct === null ? null : pct >= 100 ? '✅' : pct >= 70 ? '⚠️' : '🔴';
   const statusColor = pct === null ? C.textMuted : pct >= 100 ? C.green : pct >= 70 ? C.amber : C.red;
@@ -4184,7 +4290,10 @@ function ActivityMetricCard({ emoji, label, value, target, loading, note }) {
   return (
     <div style={{
       background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10,
-      padding: '14px 16px', flex: '1 1 140px', minWidth: 130,
+      padding: isMobile ? '10px 12px' : '14px 16px',
+      flex: isMobile ? '1 1 calc(50% - 6px)' : '1 1 140px',
+      minWidth: isMobile ? 0 : 130,
+      maxWidth: isMobile ? 'none' : undefined,
     }}>
       <div style={{ color: C.textMuted, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
         {emoji} {label}
@@ -4254,8 +4363,9 @@ function OutcomeBadge({ outcome }) {
 function StageBadge({ stage }) {
   if (!stage) return <span style={{ color: C.textMuted }}>—</span>;
   const colorMap = {
-    'Prospect': C.textMuted, 'Outreach': C.blue, 'Discovery': C.amber,
-    'SQL': C.purple, 'Negotiations': C.teal, 'Closed-Won': C.green,
+    'Prospect': C.textMuted, 'Outreach': C.blue, 'Warm Intro': C.teal,
+    'Discovery': C.amber,
+    'SQL': C.purple, 'Negotiations': C.teal, 'Closed-Won': C.green, 'Nurture': C.textSec,
   };
   const color = colorMap[stage] || C.blue;
   return (
@@ -4320,34 +4430,172 @@ function EmptyRow({ cols, msg = 'No activity today yet' }) {
 }
 
 // ── Outreach Call Detail Table (live from Outreach API) ──────────────────────
-function OutreachCallDetailTable() {
-  const [connectedOnly, setConnectedOnly] = useState(false);
-  const url = `/api/outreach-call-detail?window=today${connectedOnly ? '&connectedOnly=true' : ''}`;
-  const { data, isLoading, error } = useSWR(url, fetcher, { revalidateOnFocus: false, refreshInterval: 5 * 60000 });
-  const calls = data?.calls || [];
+function isoDate(d) {
+  // Returns YYYY-MM-DD in local time
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
 
+function OutreachCallDetailTable() {
+  // ── Date range state (default: last 7 days) ──
+  const today = isoDate(new Date());
+  const sevenAgo = isoDate(new Date(Date.now() - 6 * 86400000));
+  const [dateStart, setDateStart] = useState(sevenAgo);
+  const [dateEnd,   setDateEnd]   = useState(today);
+
+  // ── Other filter state ──
+  const [dispositionFilter, setDispositionFilter] = useState('All');
+  const [repFilter, setRepFilter] = useState('All');
+
+  // ── Selection state ──
+  const [selected, setSelected] = useState(new Set());
+
+  // ── Fetch — use custom window with date range ──
+  const url = `/api/outreach-call-detail?window=custom&start=${dateStart}&end=${dateEnd}`;
+  const { data, isLoading, error } = useSWR(url, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 5 * 60000 });
+  const allCalls = data?.calls || [];
+
+  // ── Derive unique reps + dispositions from data ──
+  const uniqueReps = useMemo(() => ['All', ...Array.from(new Set(allCalls.map(c => c.rep).filter(Boolean))).sort()], [allCalls]);
+  const uniqueDispositions = useMemo(() => {
+    const vals = Array.from(new Set(allCalls.map(c => c.disposition).filter(Boolean))).sort();
+    return ['All', 'Connected', 'Meeting Set', 'Not Connected / No Answer', 'Left Voicemail', ...vals.filter(v => !['Connected','Meeting Set','Not Connected / No Answer','Left Voicemail'].includes(v))];
+  }, [allCalls]);
+
+  // ── Client-side filtering ──
+  const calls = useMemo(() => {
+    return allCalls.filter(c => {
+      if (repFilter !== 'All' && c.rep !== repFilter) return false;
+      if (dispositionFilter !== 'All') {
+        const d = (c.disposition || '').toLowerCase();
+        const conn = c.connected;
+        if (dispositionFilter === 'Connected') {
+          if (!conn) return false;
+        } else if (dispositionFilter === 'Meeting Set') {
+          if (!d.includes('meeting') && !d.includes('set') && !d.includes('scheduled')) return false;
+        } else if (dispositionFilter === 'Not Connected / No Answer') {
+          if (conn || d.includes('voicemail') || d.includes('vm')) return false;
+        } else if (dispositionFilter === 'Left Voicemail') {
+          if (!d.includes('voicemail') && !d.includes('vm')) return false;
+        } else {
+          // Exact match for other dynamic dispositions
+          if (c.disposition !== dispositionFilter) return false;
+        }
+      }
+      return true;
+    });
+  }, [allCalls, repFilter, dispositionFilter]);
+
+  // Reset selection when filters/data change
+  useEffect(() => { setSelected(new Set()); }, [url, dispositionFilter, repFilter]);
+
+  // ── Select all logic ──
+  const allIds = calls.map(c => c.id);
+  const allSelected = allIds.length > 0 && allIds.every(id => selected.has(id));
+  const someSelected = selected.size > 0;
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(allIds));
+    }
+  }
+  function toggleRow(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // ── CSV download ──
+  function downloadCSV() {
+    const rows = calls.filter(c => selected.has(c.id));
+    const headers = ['Date', 'Time', 'Rep', 'Account', 'Contact', 'Disposition', 'Duration (s)', 'Note/Outcome', 'Recording URL', 'Outreach Link'];
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [
+      headers.join(','),
+      ...rows.map(c => [
+        c.createdAt ? c.createdAt.slice(0, 10) : '',
+        c.createdAt ? new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        c.rep || '',
+        '',  // account — not in Outreach call detail API response
+        '',  // contact — not in Outreach call detail API response
+        c.disposition || (c.connected ? 'Connected' : ''),
+        c.duration || '',
+        c.note || c.outcome || '',
+        c.recordingUrl || c.voicemailUrl || '',
+        c.outreachLink || '',
+      ].map(escape).join(','))
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `calls-${dateStart}-to-${dateEnd}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const selS = { padding: '5px 9px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textSec, fontSize: 12, cursor: 'pointer', outline: 'none' };
   const thS = { padding: '6px 10px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 600,
     borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase', letterSpacing: '0.3px', background: C.surface, whiteSpace: 'nowrap' };
   const tdS = { padding: '6px 10px', fontSize: 12, borderBottom: `1px solid ${C.border}1a`, color: C.textSec, verticalAlign: 'middle' };
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-        <span style={{ color: C.textSec, fontWeight: 600, fontSize: 12 }}>📞 Today&apos;s Calls</span>
-        {data && <span style={{ color: C.textMuted, fontSize: 11 }}>({data.total} total)</span>}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 5, color: C.textMuted, fontSize: 11, cursor: 'pointer', marginLeft: 8 }}>
-          <input type="checkbox" checked={connectedOnly} onChange={e => setConnectedOnly(e.target.checked)} style={{ accentColor: C.green }} />
-          Connected only
-        </label>
+      {/* ── Header row ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <span style={{ color: C.textSec, fontWeight: 700, fontSize: 13 }}>📞 Call Detail</span>
+        {data && <span style={{ color: C.textMuted, fontSize: 11 }}>({calls.length}{calls.length !== allCalls.length ? ` of ${allCalls.length}` : ''} calls)</span>}
+        {someSelected && (
+          <button onClick={downloadCSV} style={{
+            marginLeft: 'auto', padding: '5px 12px', background: C.green + '22', border: `1px solid ${C.green}66`,
+            borderRadius: 5, color: C.green, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+          }}>
+            ⬇ Download CSV ({selected.size} row{selected.size !== 1 ? 's' : ''})
+          </button>
+        )}
       </div>
+
+      {/* ── Filter bar ── */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+        {/* Date range */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.textMuted }}>
+          <span>From</span>
+          <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
+            style={{ ...selS, padding: '4px 7px' }} />
+          <span>to</span>
+          <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)}
+            style={{ ...selS, padding: '4px 7px' }} />
+        </div>
+        {/* Disposition */}
+        <select value={dispositionFilter} onChange={e => setDispositionFilter(e.target.value)} style={selS}>
+          {uniqueDispositions.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        {/* Rep */}
+        <select value={repFilter} onChange={e => setRepFilter(e.target.value)} style={selS}>
+          {uniqueReps.map(r => <option key={r} value={r}>{r === 'All' ? 'All Reps' : r}</option>)}
+        </select>
+        {/* Reset */}
+        {(dispositionFilter !== 'All' || repFilter !== 'All' || dateStart !== sevenAgo || dateEnd !== today) && (
+          <button onClick={() => { setDispositionFilter('All'); setRepFilter('All'); setDateStart(sevenAgo); setDateEnd(today); }}
+            style={{ ...selS, color: C.textMuted, fontSize: 11 }}>✕ Reset</button>
+        )}
+      </div>
+
       {isLoading && <div style={{ color: C.textMuted, fontSize: 12, padding: '10px 0' }}>⟳ Loading calls…</div>}
       {error && <div style={{ color: C.red, fontSize: 12 }}>⚠ Failed to load call detail</div>}
-      {!isLoading && calls.length === 0 && <div style={{ color: C.textMuted, fontSize: 12 }}>No calls found for today.</div>}
+      {!isLoading && calls.length === 0 && <div style={{ color: C.textMuted, fontSize: 12 }}>No calls match the current filters.</div>}
       {calls.length > 0 && (
         <div style={{ overflowX: 'auto', border: `1px solid ${C.border}`, borderRadius: 8 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', background: C.surface, minWidth: 600 }}>
             <thead>
               <tr>
+                <th style={{ ...thS, width: 32, padding: '6px 8px' }}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                    style={{ accentColor: C.accent, cursor: 'pointer' }} />
+                </th>
                 <th style={thS}>Time</th>
                 <th style={thS}>Rep</th>
                 <th style={thS}>Disposition</th>
@@ -4358,8 +4606,12 @@ function OutreachCallDetailTable() {
             </thead>
             <tbody>
               {calls.map((c, i) => (
-                <tr key={c.id} style={{ background: i % 2 === 0 ? 'transparent' : C.bg + '44' }}>
-                  <td style={tdS}>{c.createdAt ? new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                <tr key={c.id} style={{ background: selected.has(c.id) ? C.accent + '11' : (i % 2 === 0 ? 'transparent' : C.bg + '44') }}>
+                  <td style={{ ...tdS, padding: '6px 8px', width: 32 }}>
+                    <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleRow(c.id)}
+                      style={{ accentColor: C.accent, cursor: 'pointer' }} />
+                  </td>
+                  <td style={tdS}>{c.createdAt ? new Date(c.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
                   <td style={tdS}>{c.rep}</td>
                   <td style={{ ...tdS, color: c.connected ? C.green : C.textMuted }}>
                     {c.disposition || (c.connected ? '✅ Answered' : '—')}
@@ -4389,7 +4641,7 @@ function OutreachCallDetailTable() {
 
 // Outbound Calls table
 function OutboundCallsTable({ teamSuffix = '' }) {
-  const { data, isLoading } = useSWR(`/api/activities?window=today&type=call${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=call${teamSuffix}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
   return (
@@ -4418,7 +4670,7 @@ function OutboundCallsTable({ teamSuffix = '' }) {
 
 // Live Connects table
 function LiveConnectsTable({ teamSuffix = '' }) {
-  const { data, isLoading } = useSWR(`/api/activities?window=today&type=connects${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=connects${teamSuffix}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Rep', 'Account', 'Contact', 'Duration', 'Outcome', 'Link'];
   return (
@@ -4447,7 +4699,7 @@ function LiveConnectsTable({ teamSuffix = '' }) {
 
 // Contacts Contacted table
 function ContactsContactedTable({ teamSuffix = '' }) {
-  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const rows = data?.activities || [];
 
   // Group by contact_sfdc_id (or contact_name if no sfdc_id)
@@ -4491,7 +4743,7 @@ function ContactsContactedTable({ teamSuffix = '' }) {
 
 // Accounts Contacted table
 function AccountsContactedTable({ teamSuffix = '' }) {
-  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data, isLoading } = useSWR(`/api/activities?window=today${teamSuffix}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const rows = data?.activities || [];
 
   const grouped = useMemo(() => {
@@ -4532,7 +4784,7 @@ function AccountsContactedTable({ teamSuffix = '' }) {
 
 // Sets table
 function SetsTable({ teamSuffix = '' }) {
-  const { data, isLoading } = useSWR(`/api/activities?window=today&type=sets${teamSuffix}`, fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data, isLoading } = useSWR(`/api/activities?window=today&type=sets${teamSuffix}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const rows = data?.activities || [];
   const cols = ['Time', 'Account', 'Contact', 'Rep', 'Subject', 'SFDC'];
   return (
@@ -4557,7 +4809,7 @@ function SetsTable({ teamSuffix = '' }) {
 
 // Sync Banner
 function ActivitySyncBanner({ onRefresh }) {
-  const { data: syncData, mutate: mutateSyncLog } = useSWR('/api/sync-log', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: syncData, mutate: mutateSyncLog } = useSWR('/api/sync-log', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
   const [now, setNow] = useState(Date.now());
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
@@ -4621,12 +4873,13 @@ function ActivitySyncBanner({ onRefresh }) {
 // ─── Week date range label ────────────────────────────────────────────────────
 function getWeekRange() {
   const now = new Date();
-  const day = now.getDay(); // 0=Sun
+  const utcDay = now.getUTCDay(); // 0=Sun
   const monday = new Date(now);
-  monday.setDate(now.getDate() - ((day + 6) % 7));
+  monday.setUTCDate(now.getUTCDate() - ((utcDay + 6) % 7));
+  monday.setUTCHours(0, 0, 0, 0);
   const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
-  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  friday.setUTCDate(monday.getUTCDate() + 4);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   return `Week of ${fmt(monday)}–${fmt(friday)}`;
 }
 
@@ -4727,9 +4980,22 @@ function TrendChartSet({ data, callsTarget, connectsTarget, setsTarget }) {
 }
 
 function ActivityTrendCharts() {
-  const { data: dailyRes  } = useSWR('/api/outreach-activity-stats?window=day-14',  fetcher, { revalidateOnFocus: false });
-  const { data: weeklyRes } = useSWR('/api/outreach-activity-stats?window=week-8',  fetcher, { revalidateOnFocus: false });
-  const { data: monthlyRes} = useSWR('/api/outreach-activity-stats?window=month-6', fetcher, { revalidateOnFocus: false });
+  const TREND_MEMBERS = [
+    { id: null,  name: 'All Team' },
+    { id: 1040,  name: 'Gray Hoffman' },
+    { id: 871,   name: 'Neha Bhongir' },
+    { id: 1044,  name: 'Adam Mohiuddin' },
+    { id: 865,   name: 'Andy Sapien' },
+    { id: 1043,  name: 'Manish' },
+    { id: 866,   name: 'Arya Davey' },
+    { id: 1045,  name: 'Zareen Tabibzadegan' },
+  ];
+  const [selectedUserId, setSelectedUserId] = useState(null);
+
+  const userParam = selectedUserId ? `&userId=${selectedUserId}` : '';
+  const { data: dailyRes  } = useSWR(`/api/outreach-activity-stats?window=day-14${userParam}`,  fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: weeklyRes } = useSWR(`/api/outreach-activity-stats?window=week-8${userParam}`,  fetcher, { revalidateOnFocus: false, keepPreviousData: true });
+  const { data: monthlyRes} = useSWR(`/api/outreach-activity-stats?window=month-6${userParam}`, fetcher, { revalidateOnFocus: false, keepPreviousData: true });
 
   // Fallback placeholders while loading
   const emptyDaily  = Array.from({ length: 14 }, (_, i) => {
@@ -4752,14 +5018,29 @@ function ActivityTrendCharts() {
 
   return (
     <div>
+      {/* Person filter */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <span style={{ color: C.textMuted, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Person:</span>
+        {TREND_MEMBERS.map(m => {
+          const active = selectedUserId === m.id;
+          return (
+            <button key={String(m.id)} onClick={() => setSelectedUserId(m.id)} style={{
+              background: active ? C.accent + '22' : C.card,
+              border: `1px solid ${active ? C.accent : C.border}`,
+              borderRadius: 7, color: active ? C.accent : C.textSec,
+              padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
+            }}>{m.name}</button>
+          );
+        })}
+      </div>
       <TrendSubSection title="📅 Daily (Last 14 days)" storageKey="wt_trends_daily" defaultOpen={true}>
-        <TrendChartSet data={dailyData} callsTarget={75} connectsTarget={4} setsTarget={1} />
+        <TrendChartSet data={dailyData} callsTarget={selectedUserId ? 15 : 75} connectsTarget={selectedUserId ? 1 : 4} setsTarget={1} />
       </TrendSubSection>
       <TrendSubSection title="📆 Weekly (Last 8 weeks)" storageKey="wt_trends_weekly" defaultOpen={false}>
-        <TrendChartSet data={weeklyData} callsTarget={375} connectsTarget={20} setsTarget={5} />
+        <TrendChartSet data={weeklyData} callsTarget={selectedUserId ? 75 : 375} connectsTarget={selectedUserId ? 4 : 20} setsTarget={selectedUserId ? 1 : 5} />
       </TrendSubSection>
       <TrendSubSection title="🗓️ Monthly (Last 6 months)" storageKey="wt_trends_monthly" defaultOpen={false}>
-        <TrendChartSet data={monthlyData} callsTarget={880} connectsTarget={88} setsTarget={22} />
+        <TrendChartSet data={monthlyData} callsTarget={selectedUserId ? 176 : 880} connectsTarget={selectedUserId ? 18 : 88} setsTarget={selectedUserId ? 4 : 22} />
       </TrendSubSection>
     </div>
   );
@@ -4773,7 +5054,7 @@ function ActivityDashboard() {
   return (
     <div>
       {/* Sub-tab nav */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
         {[
           { id: 'agents-team',        label: '🤖 Agents Team',       accent: C.purple },
           { id: 'pipeline-accounts',  label: '📊 Pipeline Accounts', accent: C.blue   },
@@ -4796,9 +5077,94 @@ function ActivityDashboard() {
 }
 
 // ── Agents Team Activity (Outreach API) ───────────────────────────────────────
+
+// -- Team Member Breakdown --
+const OUTREACH_USER_NAMES = {
+  1040: 'Gray Hoffman',
+  871:  'Neha Bhongir',
+  865:  'Andy Sapien',
+  1043: 'Manish',
+  1044: 'Adam Mohiuddin',
+  866:  'Arya Davey',
+  1045: 'Zareen Tabibzadegan',
+};
+
+function TeamMemberBreakdown() {
+  const { data: ydayData, isLoading: ydayLoading } = useSWR('/api/outreach-activity-stats?window=yesterday', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 300000 });
+  const { data: weekData, isLoading: weekLoading  } = useSWR('/api/outreach-activity-stats?window=week',      fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
+
+  const MEMBERS = [
+    { id: 1040, name: 'Gray Hoffman' },
+    { id: 871,  name: 'Neha Bhongir' },
+    { id: 1044, name: 'Adam Mohiuddin' },
+    { id: 865,  name: 'Andy Sapien' },
+    { id: 1043, name: 'Manish' },
+    { id: 866,  name: 'Arya Davey' },
+    { id: 1045, name: 'Zareen Tabibzadegan' },
+  ];
+
+  const COLS = [
+    { key: 'calls',             label: 'Calls' },
+    { key: 'connects',          label: 'Connects' },
+    { key: 'emailsSent',        label: 'Emails' },
+    { key: 'contactsContacted', label: 'Contacts' },
+    { key: 'accountsContacted', label: 'Accounts' },
+    { key: 'sets',              label: 'Sets' },
+  ];
+
+  function MemberTable({ data, loading, title }) {
+    const perUser = data?.perUser || {};
+    return (
+      <div style={{ flex: '1 1 0', minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.textSec, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.4px' }}>{title}</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: C.card }}>
+                <th style={{ padding: '7px 10px', textAlign: 'left', color: C.textMuted, fontSize: 10, fontWeight: 700, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase' }}>Person</th>
+                {COLS.map(c => (
+                  <th key={c.key} style={{ padding: '7px 8px', textAlign: 'center', color: C.textMuted, fontSize: 10, fontWeight: 700, borderBottom: `1px solid ${C.border}`, textTransform: 'uppercase' }}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={COLS.length + 1} style={{ padding: 16, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>Loading...</td></tr>
+              ) : MEMBERS.map((m, i) => {
+                const uStats = perUser[m.id] || {};
+                return (
+                  <tr key={m.id} style={{ background: i % 2 === 0 ? 'transparent' : C.surface }}>
+                    <td style={{ padding: '6px 10px', color: C.textSec, fontSize: 12, whiteSpace: 'nowrap', borderBottom: `1px solid ${C.border}1a` }}>{m.name}</td>
+                    {COLS.map(c => (
+                      <td key={c.key} style={{ padding: '6px 8px', textAlign: 'center', color: uStats[c.key] > 0 ? C.textPri : C.textMuted, fontSize: 12, borderBottom: `1px solid ${C.border}1a` }}>
+                        {uStats[c.key] ?? 0}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <DashSection title="\ud83d\udcca Team Member Breakdown" accent={C.purple} defaultOpen={true}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <MemberTable data={ydayData} loading={ydayLoading} title="Yesterday" />
+        <MemberTable data={weekData}  loading={weekLoading}  title="This Week" />
+      </div>
+    </DashSection>
+  );
+}
+
 function AgentsTeamActivity() {
-  const { data: todayData, isLoading: todayLoading } = useSWR('/api/outreach-activity-stats?window=today', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
-  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/outreach-activity-stats?window=week',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: todayData, isLoading: todayLoading } = useSWR('/api/outreach-activity-stats?window=today', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
+  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/outreach-activity-stats?window=week',  fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
 
   const today = todayData?.stats || { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
   const week  = weekData?.stats  || { calls: 0, connects: 0, emailsSent: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
@@ -4852,6 +5218,9 @@ function AgentsTeamActivity() {
         </div>
       </DashSection>
 
+      {/* ── Team Member Breakdown ── */}
+      <TeamMemberBreakdown />
+
       {/* ── Daily Detail Tables (Outreach-sourced) ── */}
       <DashSection title="📋 Agents Team Daily Detail" accent={C.purple} defaultOpen={false}>
           <OutreachCallDetailTable />
@@ -4884,8 +5253,8 @@ function AgentsTeamActivity() {
 
 // ── Pipeline Accounts Activity (SFDC, filtered to active CCA opp accounts) ───
 function PipelineAccountsActivity() {
-  const { data: todayData, isLoading: todayLoading } = useSWR('/api/activity-stats?window=today&pipelineOnly=true', fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
-  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/activity-stats?window=week&pipelineOnly=true',  fetcher, { revalidateOnFocus: false, refreshInterval: 60000 });
+  const { data: todayData, isLoading: todayLoading } = useSWR('/api/activity-stats?window=today&pipelineOnly=true', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
+  const { data: weekData,  isLoading: weekLoading  } = useSWR('/api/activity-stats?window=week&pipelineOnly=true',  fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60000 });
 
   const today = todayData?.stats || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
   const week  = weekData?.stats  || { calls: 0, connects: 0, contactsContacted: 0, accountsContacted: 0, sets: 0 };
@@ -4992,7 +5361,7 @@ function AccountsDataTab() {
       getValue: (row) => row.name,
     },
     {
-      key: 'agents_stage', label: 'Stage', width: 140,
+      key: 'agents_stage', label: 'Account Stage (CCA)', width: 140,
       render: (row) => {
         const s = row.agents_stage;
         if (!s) return <span style={{ color: C.textMuted }}>—</span>;
@@ -5406,11 +5775,14 @@ function OpportunitiesTableView() {
         dataKey="opportunities"
         onRowClick={(row) => setEditingOpp(row)}
         quickFilters={[
-          { label: 'Active Only',  params: { active_only: 'true' } },
-          { label: 'Closed-Won',   params: { closed_won: 'true' } },
-          { label: 'Closed-Lost',  params: { closed_lost: 'true' } },
-          { label: 'ICP Only',     params: { agents_icp: 'true' } },
-          { label: 'Missing ACV',  params: { missing_acv: 'true' } },
+          { label: 'Active Only',         params: { active_only: 'true' } },
+          { label: 'Closed-Won',           params: { closed_won: 'true' } },
+          { label: 'Closed-Lost',          params: { closed_lost: 'true' } },
+          { label: 'ICP Only',             params: { agents_icp: 'true' } },
+          { label: 'Missing ACV',          params: { missing_acv: 'true' } },
+          { label: '⏰ Next Step ≤30d',     params: { next_step_days: '30' } },
+          { label: '📅 Close ≤60d',          params: { close_date_days: '60' } },
+          { label: '🤝 Hide Partners',      params: { hide_partners: 'true' } },
         ]}
       />
       {editingOpp && (
@@ -5429,12 +5801,16 @@ function OpportunitiesKanbanSection() {
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [editingOpp, setEditingOpp] = useState(null);
-  const [kanbanKey, setKanbanKey] = useState(0); // refresh after save
+  const [kanbanKey, setKanbanKey] = useState(0);
+  const [hidePartners, setHidePartners] = useState(false);
+  const [closeDate60, setCloseDate60] = useState(false);
+  const [nextStep30, setNextStep30] = useState(false);
+  const [kanbanSort, setKanbanSort] = useState('close_date'); // 'close_date' | 'next_step_date'
 
   const { data, isLoading, error } = useSWR(
     '/api/opportunities?active_only=true&pageSize=200',
     fetcher,
-    { revalidateOnFocus: false, refreshInterval: 60_000 }
+    { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 60_000 }
   );
 
   const all = data?.opportunities || [];
@@ -5457,8 +5833,17 @@ function OpportunitiesKanbanSection() {
           (o.name || '').toLowerCase().includes(q)
       );
     }
+    if (hidePartners) rows = rows.filter((o) => o.override_icp_reason !== 'partner');
+    if (closeDate60) {
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 60);
+      rows = rows.filter((o) => o.close_date && new Date(o.close_date) <= cutoff);
+    }
+    if (nextStep30) {
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 30);
+      rows = rows.filter((o) => o.next_step_date && new Date(o.next_step_date) <= cutoff);
+    }
     return rows;
-  }, [all, ownerFilter, search]);
+  }, [all, ownerFilter, search, hidePartners, closeDate60, nextStep30]);
 
   const KANBAN_STAGES = ['Discovery', 'SQL', 'Negotiations', 'Closed-Won'];
   const SUMMARY_STAGES = ['Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Closed-Lost'];
@@ -5580,6 +5965,24 @@ function OpportunitiesKanbanSection() {
         <span style={{ color: C.textMuted, fontSize: 11, marginLeft: 4 }}>
           {filtered.length} opp{filtered.length !== 1 ? 's' : ''}
         </span>
+        {/* Sort */}
+        <select
+          value={kanbanSort}
+          onChange={(e) => setKanbanSort(e.target.value)}
+          style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 7, color: C.textSec, padding: '6px 10px', fontSize: 12, outline: 'none', cursor: 'pointer' }}
+        >
+          <option value="close_date">Sort: Close Date</option>
+          <option value="next_step_date">Sort: Next Step Date</option>
+        </select>
+        {/* Toggle filters */}
+        {[['🤝 Hide Partners', hidePartners, setHidePartners], ['📅 Close ≤60d', closeDate60, setCloseDate60], ['⏰ Next Step ≤30d', nextStep30, setNextStep30]].map(([label, active, setter]) => (
+          <button key={label} onClick={() => setter((v) => !v)} style={{
+            background: active ? C.accent + '22' : C.card,
+            border: `1px solid ${active ? C.accent : C.border}`,
+            borderRadius: 7, color: active ? C.accent : C.textSec,
+            padding: '6px 10px', fontSize: 12, cursor: 'pointer', fontWeight: active ? 600 : 400,
+          }}>{label}</button>
+        ))}
       </div>
 
       {/* ── Kanban Board ── */}
@@ -5595,9 +5998,11 @@ function OpportunitiesKanbanSection() {
           const cards = filtered
             .filter((o) => o.stage_normalized === stage)
             .sort((a, b) => {
-              if (!a.close_date) return 1;
-              if (!b.close_date) return -1;
-              return new Date(a.close_date) - new Date(b.close_date);
+              const aVal = a[kanbanSort];
+              const bVal = b[kanbanSort];
+              if (!aVal) return 1;
+              if (!bVal) return -1;
+              return new Date(aVal) - new Date(bVal);
             });
 
           return (
@@ -5761,7 +6166,7 @@ function ActivitiesDataTab() {
   }
 
   const { data, isLoading } = useSWR(buildUrl(), fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 60_000,
   });
 
@@ -5890,7 +6295,7 @@ function ActivitiesDataTab() {
 
 function SyncLogDataTab() {
   const { data: syncData, isLoading } = useSWR('/api/sync-log', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 60_000,
   });
 
@@ -6392,13 +6797,19 @@ function ReferencesSearchSection() {
 
 // ─── Campaigns Tab ────────────────────────────────────────────────────────────
 function CampaignsTab() {
+  // ── Territory Stats ────────────────────────────────────────────────────────
+  const { data: territoryData, isLoading: terrLoading } =
+    useSWR('/api/territory-stats', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 5 * 60 * 1000 });
+  const [terrCollapsed, setTerrCollapsed] = useState(false);
+  const [campCollapsed, setCampCollapsed] = useState(false);
+
   // ── Overview metrics ──────────────────────────────────────────────────────
   const { data: overview, isLoading: ovLoading, mutate: refreshOverview } =
-    useSWR('/api/campaigns-overview', fetcher, { revalidateOnFocus: false, refreshInterval: 5 * 60 * 1000 });
+    useSWR('/api/campaigns-overview', fetcher, { revalidateOnFocus: false, keepPreviousData: true, refreshInterval: 5 * 60 * 1000 });
 
   // ── Active Sequences ──────────────────────────────────────────────────────
   const { data: sequences, isLoading: seqLoading, mutate: refreshSequences } =
-    useSWR('/api/campaigns-sequences', fetcher, { revalidateOnFocus: false });
+    useSWR('/api/campaigns-sequences', fetcher, { revalidateOnFocus: false, keepPreviousData: true });
 
   const [expandedSeq, setExpandedSeq] = useState(null);
   const [seqProspects, setSeqProspects] = useState({}); // { [seqId]: { prospects, total, page, loading } }
@@ -6532,20 +6943,125 @@ function CampaignsTab() {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '12px 0' }}>
 
+      {/* ── Territory Contact Rate ──────────────────────────────────────────── */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: terrCollapsed ? 0 : 12 }}>
+          <h3
+            onClick={() => setTerrCollapsed(v => !v)}
+            style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.textPri, letterSpacing: '-0.2px', cursor: 'pointer', userSelect: 'none' }}
+          >{terrCollapsed ? '▶' : '▼'} 🗺️ Territory Contact Rate</h3>
+          {terrLoading && <span style={{ fontSize: 11, color: C.textMuted }}>loading…</span>}
+          {!terrCollapsed && (
+            <button
+              onClick={async () => {
+                const r = await fetch('/api/territory-export?territory=all');
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'territory-all.xlsx'; a.click(); URL.revokeObjectURL(url);
+              }}
+              style={{ marginLeft: 'auto', fontSize: 11, padding: '4px 10px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, color: C.textSec, cursor: 'pointer' }}
+            >⬇️ Download All</button>
+          )}
+        </div>
+        {!terrCollapsed && (
+        <div style={{ overflowX: 'auto', borderRadius: 10, border: `1px solid ${C.border}` }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+                <th style={{ padding: '8px 12px', textAlign: 'left', color: C.textSec, fontWeight: 600 }}>Territory</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: C.textSec, fontWeight: 600 }}>Accounts</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: C.textSec, fontWeight: 600 }}>Contacts</th>
+                <th style={{ padding: '8px 10px', textAlign: 'center', color: '#f97316', fontWeight: 600, borderLeft: `1px solid ${C.border}` }} colSpan={4}>Today</th>
+                <th style={{ padding: '8px 10px', textAlign: 'center', color: C.amber, fontWeight: 600, borderLeft: `1px solid ${C.border}` }} colSpan={4}>7D</th>
+                <th style={{ padding: '8px 10px', textAlign: 'center', color: C.blue, fontWeight: 600, borderLeft: `1px solid ${C.border}` }} colSpan={4}>30D</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', color: C.textSec, fontWeight: 600, borderLeft: `1px solid ${C.border}` }}>Rep</th>
+                <th style={{ padding: '8px 8px', borderLeft: `1px solid ${C.border}` }} />
+              </tr>
+              <tr style={{ background: C.surface, borderBottom: `1px solid ${C.borderSub}` }}>
+                <th style={{ padding: '4px 12px' }} />
+                <th style={{ padding: '4px 10px' }} />
+                <th style={{ padding: '4px 10px' }} />
+                {['Calls','Emails','Contacts','Accts'].map((h,i) => (
+                  <th key={'today'+i} style={{ padding: '4px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500, borderLeft: i===0 ? `1px solid ${C.border}` : undefined }}>{h}</th>
+                ))}
+                {['Calls','Emails','Contacts','Accts'].map((h,i) => (
+                  <th key={'7d'+i} style={{ padding: '4px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500, borderLeft: i===0 ? `1px solid ${C.border}` : undefined }}>{h}</th>
+                ))}
+                {['Calls','Emails','Contacts','Accts'].map((h,i) => (
+                  <th key={'30d'+i} style={{ padding: '4px 8px', textAlign: 'right', color: C.textMuted, fontWeight: 500, borderLeft: i===0 ? `1px solid ${C.border}` : undefined }}>{h}</th>
+                ))}
+                <th style={{ padding: '4px 10px', borderLeft: `1px solid ${C.border}` }} />
+                <th style={{ padding: '4px 8px' }} />
+              </tr>
+            </thead>
+            <tbody>
+              {(territoryData?.territories || []).map((t, idx) => {
+                const isHighlight = ['t11a','t12a'].includes(t.name.toLowerCase());
+                const rowBg = isHighlight ? 'rgba(99,102,241,0.10)' : (idx % 2 === 0 ? C.card : C.surface);
+                const nameColor = isHighlight ? C.accent : C.textPri;
+                const cell = (val, borderLeft) => (
+                  <td style={{ padding: '7px 8px', textAlign: 'right', color: val > 0 ? C.textPri : C.textMuted, borderLeft: borderLeft ? `1px solid ${C.border}` : undefined }}>{val}</td>
+                );
+                return (
+                  <tr key={t.name} style={{ background: rowBg, borderBottom: `1px solid ${C.borderSub}` }}>
+                    <td style={{ padding: '7px 12px', fontWeight: isHighlight ? 700 : 500, color: nameColor, letterSpacing: '0.3px' }}>{t.name}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', color: C.textSec }}>{t.total_accounts.toLocaleString()}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', color: C.textSec }}>{t.total_contacts.toLocaleString()}</td>
+                    {cell(t.stats['today'].calls, true)}
+                    {cell(t.stats['today'].emails)}
+                    {cell(t.stats['today'].contacts_contacted)}
+                    {cell(t.stats['today'].accounts_contacted)}
+                    {cell(t.stats['7d'].calls, true)}
+                    {cell(t.stats['7d'].emails)}
+                    {cell(t.stats['7d'].contacts_contacted)}
+                    {cell(t.stats['7d'].accounts_contacted)}
+                    {cell(t.stats['30d'].calls, true)}
+                    {cell(t.stats['30d'].emails)}
+                    {cell(t.stats['30d'].contacts_contacted)}
+                    {cell(t.stats['30d'].accounts_contacted)}
+                    <td style={{ padding: '7px 10px', borderLeft: `1px solid ${C.border}`, color: t.assigned_rep ? C.textPri : C.textMuted, fontSize: 11, whiteSpace: 'nowrap' }}>{t.assigned_rep || '—'}</td>
+                    <td style={{ padding: '4px 8px', borderLeft: `1px solid ${C.border}` }}>
+                      <button
+                        title="Download territory data"
+                        onClick={async () => {
+                          const r = await fetch(`/api/territory-export?territory=${encodeURIComponent(t.name)}`);
+                          const blob = await r.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a'); a.href = url; a.download = `territory-${t.name}.xlsx`; a.click(); URL.revokeObjectURL(url);
+                        }}
+                        style={{ fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6, padding: 0 }}
+                      >⬇️</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!territoryData && !terrLoading && (
+                <tr><td colSpan={15} style={{ padding: 20, textAlign: 'center', color: C.textMuted }}>No data</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        )}
+      </div>
+
       {/* ── Section 1: Overview Cards ─────────────────────────────────────── */}
       <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px' }}>
-            🎯 Campaigns
-          </h2>
-          <button
-            onClick={() => { refreshOverview(); refreshSequences(); }}
-            style={{
-              background: C.card, border: `1px solid ${C.border}`, color: C.textSec,
-              borderRadius: 7, padding: '5px 14px', cursor: 'pointer', fontSize: 12,
-            }}
-          >⟳ Refresh</button>
-        </div>
+         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: campCollapsed ? 0 : 14 }}>
+           <h2
+             onClick={() => setCampCollapsed(v => !v)}
+             style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textPri, letterSpacing: '-0.3px', cursor: 'pointer', userSelect: 'none' }}
+           >
+             {campCollapsed ? '▶' : '▼'} 🎯 Campaigns
+           </h2>
+           {!campCollapsed && <button
+             onClick={(e) => { e.stopPropagation(); refreshOverview(); refreshSequences(); }}
+             style={{
+               background: C.card, border: `1px solid ${C.border}`, color: C.textSec,
+               borderRadius: 7, padding: '5px 14px', cursor: 'pointer', fontSize: 12,
+             }}
+           >⟳ Refresh</button>}
+         </div>
+        {!campCollapsed && (<>
 
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <ActivityMetricCard
@@ -6575,6 +7091,7 @@ function CampaignsTab() {
             {overview.stale && <span style={{ color: C.amber }}> (stale)</span>}
           </div>
         )}
+        </>)}
       </div>
 
       {/* ── Section 2: Active Sequences ───────────────────────────────────── */}
@@ -6793,7 +7310,7 @@ function CampaignsTab() {
                 }}
               >
                 <option value="">All Stages</option>
-                {['Prospect','Outreach','Discovery','SQL'].map(s => (
+                {['Prospect','Outreach','Warm Intro','Discovery','SQL','Nurture'].map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
@@ -7014,7 +7531,7 @@ function ReferencesTab() {
     { key: 'name', label: 'Account', maxWidth: 200, render: (r) => (
       <span style={{ color: C.textPri, fontWeight: 600 }}>{r.name}</span>
     )},
-    { key: 'agents_stage', label: 'Stage', render: (r) => {
+    { key: 'agents_stage', label: 'Account Stage (CCA)', render: (r) => {
       const s = r.agents_stage || '—';
       const color = STAGE_COLORS[s] || C.textMuted;
       return <span style={{ color, fontWeight: 600, fontSize: 12 }}>{s}</span>;
@@ -7124,14 +7641,14 @@ export default function Home() {
 
   const pipelineUrl = buildPipelineUrl(filters, page, 50, tick);
   const { data: pipelineData, error: pipelineError, isLoading: pipelineLoading } = useSWR(
-    pipelineUrl, fetcher, { revalidateOnFocus: false, dedupingInterval: 5000 }
+    pipelineUrl, fetcher, { revalidateOnFocus: false, keepPreviousData: true, dedupingInterval: 5000 }
   );
 
   // Stats (fast endpoint — returns immediately even on cold start)
   // Note: refreshInterval cannot reference statsData (TDZ), so we use a ref-based approach
   const [statsRefreshMs, setStatsRefreshMs] = useState(5000); // start fast, slow down once warm
   const { data: statsData } = useSWR('/api/stats', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: statsRefreshMs,
     onSuccess: (data) => {
       // Once data loads and isn't in loading state, switch to 60s refresh
@@ -7141,7 +7658,7 @@ export default function Home() {
 
   // Schema
   const { data: schema } = useSWR('/api/schema', fetcher, {
-    revalidateOnFocus: false,
+    revalidateOnFocus: false, keepPreviousData: true,
     refreshInterval: 10 * 60 * 1000,
   });
 
@@ -7160,13 +7677,16 @@ export default function Home() {
         background:   activeTab === id ? C.accent + '22' : 'transparent',
         color:        activeTab === id ? C.accent : C.textSec,
         border:       `1px solid ${activeTab === id ? C.accent + '66' : 'transparent'}`,
-        borderRadius: 8, padding: '6px 18px', cursor: 'pointer',
-        fontSize: 13, fontWeight: activeTab === id ? 600 : 400, transition: 'all 0.15s',
+        borderRadius: 8, padding: isMobile ? '5px 10px' : '6px 18px', cursor: 'pointer',
+        fontSize: isMobile ? 12 : 13, fontWeight: activeTab === id ? 600 : 400,
+        transition: 'all 0.15s', whiteSpace: 'nowrap', flexShrink: 0,
       }}
     >
       {label}
     </button>
   );
+
+  const isMobile = useIsMobile();
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.textPri }}>
@@ -7176,12 +7696,14 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
-      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 18px' }}>
+      <div style={{ maxWidth: 1440, margin: '0 auto', padding: isMobile ? '12px 10px' : '20px 18px' }}>
 
         {/* ── Header ── */}
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexWrap: 'wrap', gap: 12, marginBottom: 20, paddingBottom: 16,
+          display: 'flex', alignItems: isMobile ? 'flex-start' : 'center',
+          justifyContent: 'space-between',
+          flexDirection: isMobile ? 'column' : 'row',
+          gap: 12, marginBottom: isMobile ? 12 : 20, paddingBottom: 16,
           borderBottom: `1px solid ${C.border}`,
         }}>
           <div>
@@ -7193,7 +7715,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 16, flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: isMobile ? '100%' : 'auto', WebkitOverflowScrolling: 'touch' }}>
             {lastRefreshed && (
               <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'right' }}>
                 <div>Last refreshed: {lastRefreshed.toLocaleTimeString()}</div>
@@ -7203,6 +7725,8 @@ export default function Home() {
             <div style={{
               display: 'flex', gap: 4, background: C.card,
               border: `1px solid ${C.border}`, borderRadius: 10, padding: 4,
+              overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+              flexShrink: 0, maxWidth: isMobile ? '100vw' : 'none',
             }}>
               {tabBtn('pipeline', '📊 Dashboard')}
               {tabBtn('accounts', '🏢 Accounts')}
@@ -7242,7 +7766,7 @@ export default function Home() {
             <DataQualityBanner />
 
             {/* Dashboard section selector */}
-            <div style={{ display: 'flex', gap: 4, marginBottom: 18, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: 'fit-content' }}>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 18, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: isMobile ? '100%' : 'fit-content', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               {(['activity', 'pipeline', 'icpaccounts', 'pipelinepulse']).map((sec) => {
                 const labels = { pipeline: '🔭 Pipeline', activity: '📞 Activity', icpaccounts: '📋 ICP Accounts', pipelinepulse: '📡 Pipeline Pulse' };
                 const active = dashSection === sec;
@@ -7251,8 +7775,8 @@ export default function Home() {
                     background:   active ? C.accent + '22' : 'transparent',
                     color:        active ? C.accent : C.textSec,
                     border:       `1px solid ${active ? C.accent + '66' : 'transparent'}`,
-                    borderRadius: 7, padding: '5px 20px', cursor: 'pointer',
-                    fontSize: 13, fontWeight: active ? 600 : 400, transition: 'all 0.15s',
+                    borderRadius: 7, padding: isMobile ? '5px 10px' : '5px 20px', cursor: 'pointer',
+                    fontSize: isMobile ? 12 : 13, fontWeight: active ? 600 : 400, transition: 'all 0.15s', whiteSpace: 'nowrap',
                   }}>
                     {labels[sec]}
                   </button>

@@ -7,7 +7,7 @@
  */
 import { getAccessToken } from '../../lib/outreach';
 
-const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044];
+const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044, 866, 1045];
 const OUTREACH_BASE = 'https://api.outreach.io/api/v2';
 
 const USER_NAMES = {
@@ -31,11 +31,17 @@ export default async function handler(req, res) {
 
   try {
     const token = await getAccessToken();
-    const { window: win = 'today', connectedOnly } = req.query;
+    const { window: win = 'today', connectedOnly, start, end } = req.query;
 
     const now = new Date();
     let startISO, endISO;
-    if (win === 'week') {
+    if (win === 'custom' && start && end) {
+      // Custom date range — treat start/end as YYYY-MM-DD local dates (PT = UTC-7)
+      startISO = new Date(start + 'T07:00:00Z').toISOString();
+      const endDate = new Date(end + 'T06:59:59Z');
+      endDate.setDate(endDate.getDate() + 1);
+      endISO = endDate.toISOString();
+    } else if (win === 'week') {
       // Monday 00:00 PT
       const monday = new Date(now);
       const day = monday.getDay(); // 0=Sun
@@ -50,7 +56,7 @@ export default async function handler(req, res) {
       if (today > now) today.setDate(today.getDate() - 1);
       startISO = today.toISOString();
     }
-    endISO = now.toISOString();
+    endISO = endISO || now.toISOString();
 
     const calls = [];
 
