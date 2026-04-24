@@ -12,7 +12,7 @@
 
 import { getAccessToken } from '../../lib/outreach';
 
-const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044];
+const AGENTS_TEAM_USER_IDS = [1040, 865, 871, 1043, 1044, 866, 1045];
 const OUTREACH_BASE = 'https://api.outreach.io/api/v2';
 const CACHE_TTL = 5 * 60 * 1000;
 

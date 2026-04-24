@@ -13,9 +13,11 @@ const OUTREACH_BASE = 'https://api.outreach.io/api/v2';
 const USER_NAMES = {
   1040: 'Gray Hoffman',
   865:  'Andrew Sapien',
+  866:  'Arya Davey',
   871:  'Neha Bhongir',
   1043: 'Manish',
   1044: 'Adam',
+  1045: 'Zareen Tabibzadegan',
 };
 
 function cors(res) {

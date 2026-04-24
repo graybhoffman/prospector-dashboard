@@ -42,7 +42,7 @@ const SKIP_FIELDS = new Set([
 ]);
 
 // Fields that can be edited on an opportunity
-const OPP_EDITABLE = ['name', 'stage_normalized', 'amount', 'close_date', 'owner', 'next_step', 'next_step_date'];
+const OPP_EDITABLE = ['name', 'amount', 'close_date', 'owner', 'next_step', 'next_step_date'];
 
 const OPP_STAGE_OPTIONS = [
   'Prospect', 'Outreach', 'Discovery', 'Disco Scheduled', 'SQL',
@@ -96,7 +96,7 @@ const ACCOUNT_EDITABLE_FIELDS = [
   { key: 'ehr_system',           label: 'EHR System',            type: 'text',     sfdc: true },
   { key: 'specialty',            label: 'Specialty',             type: 'text',     sfdc: true },
   // DB-only
-  { key: 'agents_stage',         label: 'Agents Stage',          type: 'select',   options: ['','Prospect','Outreach','Discovery','SQL','Negotiations','Closed-Won','Closed-Lost'] },
+  { key: 'agents_stage',         label: 'Agents Stage',          type: 'select',   options: ['','Prospect','Outreach','Warm Intro','Discovery','SQL','Negotiations','Pilot Deployment','Full Deployment','Closed-Won','Nurture'] },
   { key: 'agents_owner',         label: 'Agents Owner',          type: 'text' },
   { key: 'enrichment_notes',     label: 'Enrichment Notes',      type: 'textarea' },
   { key: 'icp_rationale',        label: 'ICP Rationale',         type: 'textarea' },
@@ -407,6 +407,7 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
         practice_size:    opp.practice_size    || '',
         specialty:        opp.specialty        || '',
         lead_source:      opp.lead_source      || '',
+        source_sub_category: opp.source_sub_category || '',
         demo_status:      opp.demo_status      || '',
         first_demo_date:  opp.first_demo_date  ? String(opp.first_demo_date).slice(0,10) : '',
         iqm_notes:        opp.iqm_notes        || '',
@@ -576,10 +577,10 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                 </div>
                 <div>
                   <div style={labelStyle}>Stage</div>
-                  <select style={inputStyle} value={form.stage_normalized} onChange={e => setForm(f => ({ ...f, stage_normalized: e.target.value }))}>
-                    <option value="">— Select —</option>
-                    {OPP_STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  <div style={{...inputStyle, background:'#f5f5f5', color:'#666', cursor:'default', display:'flex', alignItems:'center'}}>
+                    {form.stage_normalized || '—'}
+                    <span style={{marginLeft:6, fontSize:10, color:'#999'}}>(edit in SFDC)</span>
+                  </div>
                 </div>
                 {/* Row: Amount | Close Date */}
                 <div>
@@ -628,6 +629,13 @@ function OppEditPopup({ opp: initialOpp, id, onClose, onSaved }) {
                   <select style={inputStyle} value={form.lead_source} onChange={e => setForm(f => ({ ...f, lead_source: e.target.value }))}>
                     <option value="">— Select —</option>
                     {['Advisor Outreach','Commure Scribe','Content Syndication','Cross Sell','Digital Event','Direct Traffic','Email','Event','Expansion Opportunity','Inbound','Other'].map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={labelStyle}>Source Sub-Category</div>
+                  <select style={inputStyle} value={form.source_sub_category} onChange={e => setForm(f => ({ ...f, source_sub_category: e.target.value }))}>
+                    <option value="">— Select —</option>
+                    {['Direct - all','Direct - Network','MM Scribe - Customers (x-sell)','MM Scribe - Co-sell','MM Scribe - Lead-gen','MM RCM - Customers (x-sell)','MM AIR - Customers (x-sell)','MM RCM & AIR - Co-sell (Bundle)','MM RCM & AIR - Lead-gen (Bundle)','Meditech Design Partner','Enterprise Customers - Ambient + PXP','Enterprise New Biz Co-sell - Ambient + PXP','Enterprise Sales Motion (Lead-gen)'].map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </div>
                 {/* Row: Provider Specialty | Booked By */}

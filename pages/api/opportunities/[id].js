@@ -10,6 +10,18 @@
 
 import { query } from '../../../lib/db';
 
+// DB stage → SFDC stage reverse mapping
+const DB_TO_SFDC_STAGE = {
+  'Discovery':        'IQM Set',
+  'SQL':              'Active Evaluation',
+  'Negotiations':     'Contract Negotiation',
+  'Pilot Deployment': 'Pilot',
+  'Full Deployment':  'Full Deployment',
+  'Closed-Won':       'Closed Won',
+  'Closed-Lost':      'Closed Lost',
+  'Nurture':          'Nurture',
+};
+
 const SF_USERNAME = 'gray.hoffman@getathelas.com';
 const SF_PASSWORD = 'ctk0WZK*rzw@tyh!pnp';
 const SF_TOKEN    = 'zK9vAeYocFwweG6zBmKDvO2F';
@@ -88,7 +100,7 @@ export default async function handler(req, res) {
   // ── PATCH ─────────────────────────────────────────────────────────────────
   if (req.method === 'PATCH') {
     const { name, stage_normalized, amount, close_date, owner, owner_sfdc_id, next_step, next_step_date,
-            practice_size, specialty, lead_source, demo_status, first_demo_date, iqm_notes, booked_by } = req.body || {};
+            practice_size, specialty, lead_source, source_sub_category, demo_status, first_demo_date, iqm_notes, booked_by } = req.body || {};
 
     try {
       // 1. Fetch current opp for sfdc_id
@@ -117,6 +129,7 @@ export default async function handler(req, res) {
       if (practice_size    != null) addSet('practice_size',    practice_size === '' ? null : practice_size);
       if (specialty        != null) addSet('specialty',        specialty === '' ? null : specialty);
       if (lead_source      != null) addSet('lead_source',      lead_source === '' ? null : lead_source);
+      if (source_sub_category != null) addSet('source_sub_category', source_sub_category === '' ? null : source_sub_category);
       if (demo_status      != null) addSet('demo_status',      demo_status === '' ? null : demo_status);
       if (first_demo_date  != null) addSet('first_demo_date',  first_demo_date === '' ? null : first_demo_date);
       if (iqm_notes        != null) addSet('iqm_notes',        iqm_notes === '' ? null : iqm_notes);
@@ -144,7 +157,7 @@ export default async function handler(req, res) {
 
           const sfdcPayload = {};
           if (name            != null) sfdcPayload.Name       = name;
-          if (stage_normalized != null) sfdcPayload.StageName  = stage_normalized;
+          if (stage_normalized != null) sfdcPayload.StageName = DB_TO_SFDC_STAGE[stage_normalized] || stage_normalized;
           if (amount           != null && amount !== '') sfdcPayload.Amount    = Number(amount);
           if (close_date       != null && close_date !== '') sfdcPayload.CloseDate  = close_date;
           if (owner_sfdc_id)                              sfdcPayload.OwnerId   = owner_sfdc_id;
@@ -153,6 +166,7 @@ export default async function handler(req, res) {
           if (practice_size    != null && practice_size !== '')   sfdcPayload.Practice_Size__c          = practice_size;
           if (specialty        != null)                           sfdcPayload.Specialty__c               = specialty === '' ? null : specialty;
           if (lead_source      != null && lead_source !== '')     sfdcPayload.LeadSource                 = lead_source;
+          if (source_sub_category != null)                        sfdcPayload.Lead_Source_Description__c = source_sub_category === '' ? null : source_sub_category;
           if (demo_status      != null && demo_status !== '')     sfdcPayload.Demo_Status__c             = demo_status;
           if (first_demo_date  != null && first_demo_date !== '') sfdcPayload.First_Demo_Meeting_Date__c = first_demo_date;
           if (iqm_notes        != null)                           sfdcPayload.IQM_Notes__c               = iqm_notes === '' ? null : iqm_notes;

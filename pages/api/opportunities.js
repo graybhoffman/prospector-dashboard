@@ -36,7 +36,7 @@ function cors(res) {
 
 const SORTABLE_COLS = new Set([
   'account_name', 'name', 'stage_normalized', 'stage', 'acv', 'owner',
-  'close_date', 'source_category', 'agents_icp', 'ehr',
+  'close_date', 'next_step_date', 'source_category', 'agents_icp', 'ehr',
 ]);
 
 export default async function handler(req, res) {
@@ -48,6 +48,7 @@ export default async function handler(req, res) {
     search, account_name, stage_normalized, stage, acv, owner,
     close_date, source_category, agents_icp,
     active_only, closed_won, closed_lost, missing_acv,
+    hide_partners, close_date_days, next_step_days,
     ehr,
     sort: sortCol, dir: sortDir,
     page = '1', limit, pageSize = '50',
@@ -130,6 +131,21 @@ export default async function handler(req, res) {
   }
   if (missing_acv === 'true') {
     conditions.push('(acv IS NULL OR acv = 0)');
+  }
+  if (hide_partners === 'true') {
+    conditions.push("(override_icp_reason IS NULL OR override_icp_reason != 'partner')");
+  }
+  if (close_date_days) {
+    const days = parseInt(close_date_days, 10);
+    if (!isNaN(days)) {
+      conditions.push(`close_date >= CURRENT_DATE AND close_date <= CURRENT_DATE + INTERVAL '${days} days'`);
+    }
+  }
+  if (next_step_days) {
+    const days = parseInt(next_step_days, 10);
+    if (!isNaN(days)) {
+      conditions.push(`next_step_date >= CURRENT_DATE AND next_step_date <= CURRENT_DATE + INTERVAL '${days} days'`);
+    }
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

@@ -21,7 +21,7 @@
 
 import { query } from '../../lib/db';
 
-const PROSPECT_OUTREACH_STAGES = ['Prospect', 'Outreach'];
+const PROSPECT_OUTREACH_STAGES = ['Prospect', 'Outreach', 'Warm Intro'];
 const DISCOVERY_PLUS_STAGES    = ['Discovery', 'SQL', 'Negotiations', 'Closed-Won', 'Pilot Deployment', 'Full Deployment'];
 
 function cors(res) {
@@ -58,6 +58,23 @@ function accountToRecord(row) {
   };
 }
 
+const SFDC_USER_NAMES = {
+  '005Vo000007stN7IAI': 'Gray Hoffman',
+  '005Vo00000rj133IAA': 'Neha Bhongir',
+  '005Vo000004CeUCIA0': 'Andrew Jin',
+  '005Vo00000EsyK5IAJ': 'Adam Mohiuddin',
+  '005Vo00000p5vwOIAQ': 'Andy Sapien',
+  '005Vo00000URBUMIA5': 'Andy Sapien',
+  '0057V00000AminrQAB': 'Deepika Bodapati',
+  '005Vo0000073OzSIAU': 'Sean Edrington',
+  '005Vo00000UQiKIIA1': 'Daniel Carter',
+  '0055e000004xDZrAAM': 'Vishnu Gettu',
+};
+function resolveUserName(val) {
+  if (!val) return null;
+  return SFDC_USER_NAMES[val] || val;
+}
+
 // Map a Postgres opportunity row → Notion-compatible record shape
 function oppToRecord(row) {
   return {
@@ -65,14 +82,15 @@ function oppToRecord(row) {
     fields: {
       'Account Name': row.account_name,
       'Stage':        row.stage_normalized,
-      'EHR':          row.ehr || row.acct_ehr_system || null,
+      'EHR':          row.ehr_system || row.acct_ehr_system || null,
       'ACV':          row.acv != null ? Number(row.acv) : 0,
       'Close Date':   row.close_date,
       'Owner':        row.owner || null,
       'Specialty':    row.acct_specialty || null,
-      'Source Category': row.acct_source_category || null,
+      'Source Category': row.acct_source_category || row.source_category || null,
+      'Source Sub-Category': row.source_sub_category || null,
       'Est. Calls/Month': row.est_monthly_call_volume != null ? Number(row.est_monthly_call_volume) : null,
-      'Booked By':    row.booked_by || null,
+      'Booked By':    resolveUserName(row.booked_by) || null,
       'Opp Name':      row.name || null,
       'Account SFDC ID': row.account_sfdc_id || null,
       'SFDC Link':    row.sfdc_id
@@ -95,7 +113,12 @@ export default async function handler(req, res) {
     const {
       ehr, stage, specialty, source, roe, search,
       page: pageQ, pageSize: pageSizeQ,
+      hide_partners, close_date_days, next_step_days,
     } = req.query;
+
+    const hidePartners   = hide_partners === 'true';
+    const closeDateDays  = parseInt(close_date_days || '0', 10) || 0;
+    const nextStepDays   = parseInt(next_step_days  || '0', 10) || 0;
 
     const page     = Math.max(1, parseInt(pageQ     || '1',  10));
     const pageSize = Math.min(500, parseInt(pageSizeQ || '50', 10));
@@ -144,6 +167,9 @@ export default async function handler(req, res) {
       if (search) {
         conds.push(`name ILIKE ${p('%' + search + '%')}`);
       }
+      if (hidePartners) {
+        conds.push(`(override_icp_reason IS NULL OR override_icp_reason != 'partner')`);
+      }
       return { where: `WHERE ${conds.join(' AND ')}`, params };
     }
 
@@ -161,6 +187,15 @@ export default async function handler(req, res) {
       if (search) {
         conds.push(`account_name ILIKE ${p('%' + search + '%')}`);
       }
+      if (hidePartners) {
+        conds.push(`(account_sfdc_id IS NULL OR account_sfdc_id NOT IN (SELECT sfdc_id FROM accounts WHERE override_icp_reason = 'partner' AND sfdc_id IS NOT NULL))`);
+      }
+      if (closeDateDays > 0) {
+        conds.push(`close_date IS NOT NULL AND close_date <= (CURRENT_DATE + INTERVAL '${closeDateDays} days')`);
+      }
+      if (nextStepDays > 0) {
+        conds.push(`next_step_date IS NOT NULL AND next_step_date <= (CURRENT_DATE + INTERVAL '${nextStepDays} days')`);
+      }
       // EHR, specialty, source don't have matching fields in opportunities — skip
       return { where: `WHERE ${conds.join(' AND ')}`, params };
     }
@@ -172,7 +207,8 @@ export default async function handler(req, res) {
     const [discoveryPlusRes, closedWonRes, deployedArrRes] = await Promise.all([
       query(`SELECT COUNT(*) FROM opportunities
         WHERE stage_normalized IS NOT NULL
-          AND stage_normalized NOT ILIKE '%lost%'`),
+          AND stage_normalized NOT ILIKE '%lost%'
+          AND (account_sfdc_id IS NULL OR account_sfdc_id NOT IN (SELECT sfdc_id FROM accounts WHERE override_icp_reason = 'partner' AND sfdc_id IS NOT NULL))`),
       query(`SELECT COUNT(*) FROM opportunities WHERE stage_normalized ILIKE '%won%'`).catch(() => ({ rows: [{ count: '0' }] })),
       query(`SELECT COALESCE(SUM(acv), 0) AS total FROM opportunities
         WHERE stage_normalized ILIKE '%won%' OR stage_normalized ILIKE '%deployment%'`).catch(() => ({ rows: [{ total: '0' }] })),
@@ -192,7 +228,7 @@ export default async function handler(req, res) {
       SELECT agents_stage AS stage, COUNT(*)::int AS cnt
       FROM accounts
       WHERE db_status = 'main' AND (exclude_from_reporting IS NOT TRUE)
-        AND agents_stage IN ('Prospect', 'Outreach')
+        AND agents_stage IN ('Prospect', 'Outreach', 'Warm Intro')
       GROUP BY 1
       UNION ALL
       SELECT stage_normalized AS stage, COUNT(*)::int AS cnt

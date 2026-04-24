@@ -20,7 +20,7 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-const AGENTS_TEAM_OUTREACH_IDS = ['1040', '865', '871', '1043', '1044'];
+const AGENTS_TEAM_OUTREACH_IDS = ['1040', '865', '871', '1043', '1044', '866', '1045'];
 
 export default async function handler(req, res) {
   cors(res);
